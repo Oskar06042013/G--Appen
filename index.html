@@ -418,10 +418,12 @@
           var form = document.getElementById("onboarding-form");
           if (!form) return;
           form.addEventListener("submit", function (evt) {
-            // If app.js loaded, it will call preventDefault itself.
-            // This only stops a hard reload if app.js didn't attach.
-            evt.preventDefault();
-            show("Tips: Hvis du ikke kommer inn i spillet, er det en app-feil. Se meldingen her.");
+            // Only stop a hard reload if app.js did NOT boot.
+            // If app is ready, let app.js handle the form submit.
+            if (!window.__GA_APP_READY) {
+              evt.preventDefault();
+              show("Appen er ikke ferdig lastet. Prøv å refresh, eller se feilmelding over.");
+            }
           });
         });
       })();

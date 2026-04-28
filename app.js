@@ -1756,6 +1756,8 @@ function escapeHtml(s) {
 }
 
 function boot() {
+  // Used by index.html failsafe to avoid blocking submits.
+  window.__GA_APP_READY = true;
   initNav();
   initOnboarding();
   initProfile();
