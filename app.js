@@ -234,6 +234,13 @@ let motion = {
   score: 0, // 0..1
   lastUpdatedAt: 0,
   stableHighSpeedSeconds: 0,
+  // step/cadence heuristics
+  hp: 0,
+  hpEma: 0,
+  lastStepAt: 0,
+  stepCount: 0,
+  cadenceSpm: 0,
+  stepConfidence: 0, // 0..1
 };
 
 let session = {
@@ -620,7 +627,12 @@ function updateStatsUi() {
 
   const motionEl = $("#motion-status");
   if (motionEl) {
-    motionEl.textContent = motion.enabled ? `${Math.round(motion.score * 100)}%` : "Ikke støttet";
+    if (!motion.enabled) motionEl.textContent = "Ikke støttet";
+    else {
+      const steps = motion.stepConfidence != null ? Math.round(motion.stepConfidence * 100) : 0;
+      const cad = motion.cadenceSpm ? Math.round(motion.cadenceSpm) : 0;
+      motionEl.textContent = cad ? `${steps}% • ${cad} spm` : `${steps}%`;
+    }
   }
 
   const bonusEl = $("#bonus-status");
@@ -702,14 +714,26 @@ function canAwardPoints(activity, speedMps) {
   if (!motion.enabled) return { ok: true, why: "Sensor ikke tilgjengelig" };
 
   const score = motion.score ?? 0;
+  const stepC = motion.stepConfidence ?? 0;
+  const cad = motion.cadenceSpm ?? 0;
 
-  // Walking typically shows step-like motion; cycling can be smoother.
-  const minScore = activity === "går" ? 0.22 : 0.10;
-  if (score < minScore) return { ok: false, why: "Lite bevegelse registrert" };
+  // Require "real body movement" like a watch.
+  // - For walking: require step-like cadence.
+  // - For cycling: allow smoother, but still require some motion texture.
+  if (activity === "går") {
+    if (stepC < 0.20 || cad < 80) return { ok: false, why: "Ingen steg registrert" };
+  } else if (activity === "sykler") {
+    if (score < 0.12 && stepC < 0.10) return { ok: false, why: "Lite kroppsbevegelse" };
+  }
 
   // Stable high speed suggests vehicle/e-scooter. Block if >4.2 m/s for a while with low motion.
   if (typeof speedMps === "number" && speedMps > 4.2 && score < 0.16 && motion.stableHighSpeedSeconds >= 35) {
     return { ok: false, why: "Mistenker kjøretøy/sparkesykkel" };
+  }
+
+  // Extra e-scooter heuristic: medium-high speed with very low steps + low motion texture.
+  if (typeof speedMps === "number" && speedMps >= 3.0 && speedMps <= 7.0 && stepC < 0.12 && score < 0.14) {
+    return { ok: false, why: "Mistenker sparkesykkel" };
   }
 
   return { ok: true, why: "OK" };
@@ -1080,6 +1104,40 @@ function startMotion() {
     const v = motion.variance || 0;
     motion.score = clamp((v - 0.06) / 0.55, 0, 1);
     motion.lastUpdatedAt = t;
+
+    // Step / cadence estimation (watch-like feeling)
+    // High-pass-ish signal from diff (removes gravity + slow drift)
+    const hp = diff;
+    const hpAbs = Math.abs(hp);
+    // Smooth amplitude envelope
+    motion.hpEma = (motion.hpEma || hpAbs) + 0.18 * (hpAbs - (motion.hpEma || hpAbs));
+
+    // Dynamic threshold: requires some movement amplitude
+    const thr = Math.max(0.22, (motion.hpEma || 0) * 0.85);
+    const minStepGapMs = 280; // prevents double-counting
+    const maxStepGapMs = 1400; // ignore very slow/erratic
+
+    // Peak-ish detection: "hpAbs" crossing threshold with refractory period
+    if (hpAbs > thr && t - (motion.lastStepAt || 0) > minStepGapMs) {
+      const gap = t - (motion.lastStepAt || 0);
+      if (!motion.lastStepAt || gap < maxStepGapMs) {
+        motion.stepCount = (motion.stepCount || 0) + 1;
+        // cadence in steps per minute from last gap
+        if (motion.lastStepAt && gap > 0) {
+          const spm = 60000 / gap;
+          // clamp plausible walking cadence 60–200 spm
+          const clamped = clamp(spm, 60, 200);
+          motion.cadenceSpm = motion.cadenceSpm ? 0.7 * motion.cadenceSpm + 0.3 * clamped : clamped;
+        }
+        motion.lastStepAt = t;
+      }
+    }
+
+    // Confidence: steps recently + cadence plausible
+    const sinceStepMs = t - (motion.lastStepAt || 0);
+    const recent = sinceStepMs < 1500 ? 1 : sinceStepMs < 3000 ? 0.5 : 0;
+    const cadenceOk = motion.cadenceSpm >= 80 && motion.cadenceSpm <= 190 ? 1 : 0.4;
+    motion.stepConfidence = clamp((recent * 0.65 + cadenceOk * 0.35) * motion.score, 0, 1);
   };
 
   window.addEventListener("devicemotion", handler, { passive: true });
