@@ -3,8 +3,18 @@
 const STORAGE_KEY = "gaAppen_v1";
 const MAPTILER_STORAGE_KEY = "gaAppen_maptiler_key";
 const SUPABASE_STORAGE_KEY = "gaAppen_supabase_v1"; // { url, anon }
+const DISPLAY_NAME_STORAGE_KEY = "gaAppen_display_name_v1";
 
 let sb = null;
+
+function loadDisplayName() {
+  const v = localStorage.getItem(DISPLAY_NAME_STORAGE_KEY);
+  return v ? String(v) : "";
+}
+
+function saveDisplayName(name) {
+  localStorage.setItem(DISPLAY_NAME_STORAGE_KEY, String(name || "").trim());
+}
 
 function loadSupabaseConfig() {
   try {
@@ -59,7 +69,8 @@ async function updateAuthUi() {
   }
   const { data } = await client.auth.getSession();
   const email = data?.session?.user?.email;
-  status.textContent = email ? `Innlogget: ${email}` : "Ikke innlogget";
+  const dn = loadDisplayName();
+  status.textContent = email ? `Innlogget: ${email}${dn ? ` • Navn: ${dn}` : ""}` : "Ikke innlogget";
 }
 
 async function ensureProfileInSupabase(displayNameOverride) {
@@ -71,6 +82,7 @@ async function ensureProfileInSupabase(displayNameOverride) {
 
   const displayName =
     (displayNameOverride && String(displayNameOverride).trim()) ||
+    loadDisplayName() ||
     (state.profile.epost ? String(state.profile.epost).split("@")[0] : "spiller");
 
   const row = {
@@ -1350,7 +1362,7 @@ function initProfile() {
   const authEmail = document.querySelector("#auth-email");
   const authName = document.querySelector("#auth-name");
   if (authEmail && state.profile?.epost) authEmail.value = state.profile.epost;
-  if (authName && state.profile?.epost) authName.value = String(state.profile.epost).split("@")[0] || "";
+  if (authName) authName.value = loadDisplayName() || (state.profile?.epost ? String(state.profile.epost).split("@")[0] : "");
 
   document.querySelector("#btn-auth-login")?.addEventListener("click", async () => {
     const client = ensureSupabase();
@@ -1359,6 +1371,12 @@ function initProfile() {
       return;
     }
     const email = String(authEmail?.value || "").trim();
+    const name = String(authName?.value || "").trim();
+    if (!name) {
+      setNotice(document.querySelector("#win-notice"), "Skriv navnet ditt først (for topplista).", "is-warn");
+      return;
+    }
+    saveDisplayName(name);
     if (!email) return;
     const redirectTo = `${location.origin}${location.pathname}`;
     const { error } = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
@@ -1759,6 +1777,11 @@ function boot() {
   updateProfileForm();
   updateStatsUi();
   updateSessionUi();
+
+  // Ensure Supabase session persists across app restarts (PWA).
+  // If you are already logged in, this will restore it from localStorage.
+  ensureSupabase();
+  updateAuthUi();
 
   // Map key UI
   const keyInput = $("#maptiler-key");
