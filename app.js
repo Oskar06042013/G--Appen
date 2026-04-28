@@ -105,6 +105,34 @@ function seasonKeyFromDate(dateKey) {
   return `${d.getFullYear()}-Q${q}`;
 }
 
+function seasonRangeFromKey(seasonKey) {
+  const m = /^(\d{4})-Q([1-4])$/.exec(String(seasonKey));
+  if (!m) return null;
+  const year = Number(m[1]);
+  const q = Number(m[2]);
+  const startMonth = (q - 1) * 3; // 0,3,6,9
+  const start = new Date(year, startMonth, 1);
+  const end = new Date(year, startMonth + 3, 0); // last day of quarter
+  return { startIso: nowIsoFromDate(start), endIso: nowIsoFromDate(end) };
+}
+
+function isIsoBetweenInclusive(d, startIso, endIso) {
+  return isIsoOnOrBefore(startIso, d) && isIsoOnOrBefore(d, endIso);
+}
+
+function calcSeasonStats(state, seasonKey) {
+  const range = seasonRangeFromKey(seasonKey);
+  if (!range) return { points: 0, activeMeters: 0, range: null };
+  let points = 0;
+  let activeMeters = 0;
+  for (const [dateKey, daily] of Object.entries(state.daily ?? {})) {
+    if (!isIsoBetweenInclusive(dateKey, range.startIso, range.endIso)) continue;
+    points += Number(daily?.points ?? 0);
+    activeMeters += Number(daily?.activeMeters ?? 0);
+  }
+  return { points, activeMeters, range };
+}
+
 function detectActivity(speedMps, accuracyM) {
   if (typeof speedMps !== "number" || Number.isNaN(speedMps)) return "ukjent";
 
@@ -242,6 +270,7 @@ function ensureMap() {
   // Esri World Imagery is widely compatible in browsers.
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     maxZoom: 19,
+    detectRetina: true,
     attribution:
       'Tiles &copy; <a href="https://www.esri.com/" target="_blank" rel="noreferrer">Esri</a> • Data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
   }).addTo(map);
@@ -297,6 +326,7 @@ function ensureMap3D() {
     pitch: 62,
     bearing: -18,
     antialias: true,
+    pixelRatio: Math.min(2, window.devicePixelRatio || 1),
   });
 
   map3d.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
@@ -310,6 +340,27 @@ function ensureMap3D() {
   );
 
   map3d.on("load", () => {
+    // Reduce visible "tile seams" on mobile for raster layers (satellite imagery).
+    // Works around faint grid lines between tiles.
+    try {
+      const style = map3d.getStyle();
+      for (const layer of style.layers ?? []) {
+        if (layer.type !== "raster") continue;
+        try {
+          map3d.setPaintProperty(layer.id, "raster-fade-duration", 0);
+        } catch {
+          // ignore
+        }
+        try {
+          map3d.setPaintProperty(layer.id, "raster-resampling", "linear");
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     // Terrain (3D ground). Works with MapTiler terrain tiles.
     try {
       map3d.addSource("terrain", {
@@ -934,6 +985,21 @@ function initPlayControls() {
   $("#btn-start")?.addEventListener("click", startSession);
   $("#btn-stop")?.addEventListener("click", stopSession);
   $("#btn-center")?.addEventListener("click", centerOnAvatar);
+  $("#btn-panel")?.addEventListener("click", () => {
+    const play = document.querySelector(".play");
+    if (!play) return;
+    const collapsed = play.classList.toggle("is-panel-collapsed");
+    const btn = $("#btn-panel");
+    if (btn) {
+      btn.textContent = collapsed ? "Vis" : "Skjul";
+      btn.setAttribute("aria-expanded", String(!collapsed));
+    }
+    // Ensure map gets a resize after layout change
+    setTimeout(() => {
+      if (mapMode === "3d") map3d && map3d.resize();
+      else map && map.invalidateSize();
+    }, 80);
+  });
   $("#btn-refresh-location")?.addEventListener("click", () => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
@@ -1034,6 +1100,16 @@ function renderSchool() {
   const seasonKey = seasonKeyFromDate(dateKey);
   const seasonPill = $("#season-pill");
   if (seasonPill) seasonPill.textContent = `Sesong: ${seasonKey}`;
+
+  const seasonStats = calcSeasonStats(state, seasonKey);
+  const seasonDistanceEl = $("#season-distance");
+  if (seasonDistanceEl) seasonDistanceEl.textContent = `${(seasonStats.activeMeters / 1000).toFixed(2)} km`;
+  const seasonPointsEl = $("#season-points");
+  if (seasonPointsEl) seasonPointsEl.textContent = String(seasonStats.points);
+  const seasonRangeEl = $("#season-range");
+  if (seasonRangeEl) {
+    seasonRangeEl.textContent = seasonStats.range ? `${seasonStats.range.startIso} → ${seasonStats.range.endIso}` : "—";
+  }
 
   const school = state.profile?.skole ?? "";
   const rows = (state.school?.publishedScores ?? [])

@@ -171,6 +171,11 @@ input:focus{
   padding: 10px 12px;
   cursor: pointer;
 }
+.btn--sm{
+  padding: 7px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+}
 .btn:hover{ background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.22); }
 .btn:disabled{ opacity: .55; cursor: not-allowed; }
 .btn--primary{
@@ -338,6 +343,8 @@ input:focus{
     top: auto;
     bottom: 14px;
     width: auto;
+    max-height: 52vh; /* leave visible map area to drag */
+    overflow: auto;
   }
   .play__card{
     padding: 14px;
@@ -345,6 +352,35 @@ input:focus{
   .stats{
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
+
+/* Collapsible panel: keep map draggable */
+.play.is-panel-collapsed .play__panel{
+  max-height: none;
+  overflow: visible;
+}
+.play.is-panel-collapsed .play__card{
+  padding: 12px 14px;
+}
+.play.is-panel-collapsed .stats,
+.play.is-panel-collapsed .actions,
+.play.is-panel-collapsed .notice,
+.play.is-panel-collapsed details,
+.play.is-panel-collapsed .panel__hint{
+  display: none !important;
+}
+
+/* Mobile map gestures */
+#map{
+  touch-action: pan-x pan-y;
+}
+
+/* Reduce visible tile seams / grid lines on some phones */
+.leaflet-tile{
+  outline: 1px solid transparent;
+}
+.maplibregl-canvas{
+  outline: none;
 }
 
 @media (max-width: 520px){

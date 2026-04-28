@@ -102,7 +102,12 @@
                   <div class="panel__title">Gå Appen</div>
                   <div class="muted" id="player-subtitle"></div>
                 </div>
-                <div class="pill" id="session-status">Ikke aktiv</div>
+                <div class="row" style="gap:10px">
+                  <button class="btn btn--ghost btn--sm" id="btn-panel" type="button" aria-expanded="true">
+                    Skjul
+                  </button>
+                  <div class="pill" id="session-status">Ikke aktiv</div>
+                </div>
               </div>
 
               <div class="stats">
@@ -195,6 +200,21 @@
               </p>
             </div>
             <div class="pill" id="season-pill">Sesong</div>
+          </div>
+
+          <div class="stats" style="margin-top:14px">
+            <div class="stat">
+              <div class="stat__label">Distanse i sesongen</div>
+              <div class="stat__value" id="season-distance">0.00 km</div>
+            </div>
+            <div class="stat">
+              <div class="stat__label">Poeng i sesongen</div>
+              <div class="stat__value" id="season-points">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat__label">Sesong-periode</div>
+              <div class="stat__value" id="season-range">—</div>
+            </div>
           </div>
 
           <div class="grid-2">
