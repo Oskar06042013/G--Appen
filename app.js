@@ -143,6 +143,11 @@ function defaultState() {
       lastKnown: null, // { lat, lng, at }
       trail: [], // [{ lat, lng, at, acc }]
     },
+    gamification: {
+      badges: [], // array of { id, earnedAt, title }
+      weekly: {}, // weekKey -> { challengeId, progress, target, completedAt? }
+      sessions: {}, // dateKey -> { startedAt, endedAt, pointsStart, metersStart }
+    },
     daily: {}, // by YYYY-MM-DD
   };
 }
@@ -156,6 +161,22 @@ function getDaily(state, dateKey) {
     };
   }
   return state.daily[dateKey];
+}
+
+function isoWeekKey(d = new Date()) {
+  // ISO week key like "2026-W17"
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((date - yearStart) / 86400000 + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+function co2SavedKgFromMeters(meters) {
+  // Simple estimate: average passenger car ~180 g CO2 / km (varies a lot).
+  const km = meters / 1000;
+  return km * 0.18;
 }
 
 function isoToDate(d) {
@@ -716,14 +737,38 @@ function updateStatsUi() {
     }
   }
 
-  const bonusEl = $("#bonus-status");
-  if (bonusEl) {
-    if (hasDoubleBonus(state, dateKey)) bonusEl.textContent = `Dobbel t.o.m. ${state.bonuses.doubleUntil}`;
-    else {
-      const km3 = calc3DayKm(state, dateKey);
-      bonusEl.textContent = `${km3.toFixed(1)} / 5.0 km (3 dager)`;
-    }
+  const co2El = $("#co2-today");
+  if (co2El) co2El.textContent = `${co2SavedKgFromMeters(d.activeMeters ?? 0).toFixed(1)} kg`;
+
+  // Weekly challenge + badges
+  const week = isoWeekKey(new Date());
+  const weekly = (state.gamification?.weekly ??= {});
+  if (!weekly[week]) {
+    // Default weekly challenge (fast, simple): walk/bike 10 km this week
+    weekly[week] = { challengeId: "weekly_10km", progress: 0, target: 10_000 };
   }
+  // progress = sum active meters this week (approx; computed from daily keys)
+  let weekMeters = 0;
+  const today = new Date();
+  for (let i = 0; i < 7; i++) {
+    const dt = new Date(today);
+    dt.setDate(today.getDate() - i);
+    const k = nowIsoFromDate(dt);
+    weekMeters += Number(state.daily?.[k]?.activeMeters ?? 0);
+  }
+  weekly[week].progress = weekMeters;
+  if (!weekly[week].completedAt && weekMeters >= weekly[week].target) weekly[week].completedAt = Date.now();
+
+  const weeklyEl = $("#weekly-challenge");
+  if (weeklyEl) {
+    const km = (weekMeters / 1000).toFixed(1);
+    const tgt = (weekly[week].target / 1000).toFixed(0);
+    weeklyEl.textContent = weekly[week].completedAt ? `Ferdig! (${km}/${tgt} km)` : `${km}/${tgt} km`;
+  }
+
+  const badges = (state.gamification?.badges ??= []);
+  const badgeEl = $("#badge-count");
+  if (badgeEl) badgeEl.textContent = String(badges.length);
 }
 
 function updateSessionUi() {
@@ -930,6 +975,15 @@ function onPosition(pos) {
 
       // Check/award bonus after updating distances
       ensureDoubleBonusIfEarned(state, dateKey);
+
+      // Badge: 5 km in 3 days unlock (when bonus triggers)
+      if (hasDoubleBonus(state, dateKey)) {
+        const badges = (state.gamification?.badges ??= []);
+        const id = `bonus_${state.bonuses.doubleUntil}`;
+        if (!badges.some((b) => b.id === id)) {
+          badges.push({ id, earnedAt: Date.now(), title: "Boost!" });
+        }
+      }
     }
   }
 
@@ -969,6 +1023,19 @@ function startSession() {
   session.active = true;
   updateSessionUi();
 
+  // Save session baseline so we can show a nice "arrived" summary.
+  const dateKey = nowIsoDate();
+  (state.gamification ??= { badges: [], weekly: {}, sessions: {} });
+  state.gamification.sessions[dateKey] = {
+    startedAt: Date.now(),
+    endedAt: null,
+    pointsStart: Number(getDaily(state, dateKey).points ?? 0),
+    metersStart: Number(getDaily(state, dateKey).activeMeters ?? 0),
+  };
+  saveState(state);
+  const arrived = document.querySelector("#btn-arrived");
+  if (arrived) arrived.disabled = false;
+
   // Try high accuracy; mobile browsers may throttle in background.
   session.watchId = navigator.geolocation.watchPosition(onPosition, onPositionError, {
     enableHighAccuracy: true,
@@ -986,6 +1053,9 @@ function stopSession() {
   }
   const mot = $("#motivation");
   if (mot) setNotice(mot, "Økta er stoppet. Bra jobba i dag!", "is-good");
+
+  const arrived = document.querySelector("#btn-arrived");
+  if (arrived) arrived.disabled = true;
 }
 
 function initNav() {
@@ -1154,6 +1224,38 @@ function initProfile() {
 function initPlayControls() {
   $("#btn-start")?.addEventListener("click", startSession);
   $("#btn-stop")?.addEventListener("click", stopSession);
+  $("#btn-arrived")?.addEventListener("click", () => {
+    const dateKey = nowIsoDate();
+    const sess = state.gamification?.sessions?.[dateKey];
+    stopSession();
+
+    const d = getDaily(state, dateKey);
+    const pointsNow = Number(d.points ?? 0);
+    const metersNow = Number(d.activeMeters ?? 0);
+    const gainedPoints = sess ? Math.max(0, pointsNow - Number(sess.pointsStart ?? 0)) : 0;
+    const gainedMeters = sess ? Math.max(0, metersNow - Number(sess.metersStart ?? 0)) : 0;
+
+    if (sess) {
+      sess.endedAt = Date.now();
+      saveState(state);
+    }
+
+    // Badge: first arrival of the day with >= 500m active
+    const badges = (state.gamification?.badges ??= []);
+    const badgeId = `arrival_${dateKey}`;
+    if (gainedMeters >= 500 && !badges.some((b) => b.id === badgeId)) {
+      badges.push({ id: badgeId, earnedAt: Date.now(), title: "Kom fram!" });
+      saveState(state);
+    }
+
+    const mot = $("#motivation");
+    if (mot) {
+      const km = (gainedMeters / 1000).toFixed(2);
+      const co2 = co2SavedKgFromMeters(gainedMeters).toFixed(2);
+      setNotice(mot, `Fremme! +${gainedPoints} poeng • ${km} km • ca. ${co2} kg CO₂ spart`, "is-good");
+    }
+    updateStatsUi();
+  });
   $("#btn-center")?.addEventListener("click", centerOnAvatar);
   $("#btn-panel")?.addEventListener("click", () => {
     const play = document.querySelector(".play");

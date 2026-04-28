@@ -132,13 +132,25 @@
                   <div class="stat__value" id="motion-status">—</div>
                 </div>
                 <div class="stat">
-                  <div class="stat__label">Bonus</div>
-                  <div class="stat__value" id="bonus-status">Ingen</div>
+                  <div class="stat__label">CO₂ spart (i dag)</div>
+                  <div class="stat__value" id="co2-today">0.0 kg</div>
+                </div>
+              </div>
+
+              <div class="stats stats--2" style="margin-top:10px">
+                <div class="stat">
+                  <div class="stat__label">Ukesoppdrag</div>
+                  <div class="stat__value" id="weekly-challenge">—</div>
+                </div>
+                <div class="stat">
+                  <div class="stat__label">Badges</div>
+                  <div class="stat__value" id="badge-count">0</div>
                 </div>
               </div>
 
               <div class="actions">
                 <button class="btn btn--primary" id="btn-start">Start dagens tur</button>
+                <button class="btn btn--primary" id="btn-arrived" disabled>Jeg er fremme</button>
                 <button class="btn" id="btn-stop" disabled>Stopp</button>
                 <button class="btn btn--ghost" id="btn-center">Sentrer</button>
                 <button class="btn btn--ghost" id="btn-refresh-location" type="button">Oppdater posisjon</button>
@@ -179,8 +191,17 @@
                 <ul>
                   <li>Poeng teller kun ved <strong>gåing</strong> og <strong>sykling</strong>.</li>
                   <li>Ved høy fart (bil/buss/tog/sparkesykkel) får du <strong>0 poeng</strong>.</li>
-                  <li>Sensor brukes for å redusere juks.</li>
+                  <li>Sensor brukes for å måle “ekte innsats” (steg/kadens), så det blir vanskelig å jukse.</li>
                   <li>Bonus: <strong>5 km på 3 dager</strong> gir <strong>dobbel poeng</strong> i 3 dager.</li>
+                </ul>
+              </details>
+
+              <details class="details">
+                <summary>Personvern (kort)</summary>
+                <ul>
+                  <li>Som standard lagres data <strong>lokalt på enheten</strong> din.</li>
+                  <li>Hvis dere bruker online toppliste, lagres kun <strong>poeng og distanse</strong> per dag/sesong.</li>
+                  <li>Vi lagrer ikke ruten din i skyen i denne versjonen.</li>
                 </ul>
               </details>
 
