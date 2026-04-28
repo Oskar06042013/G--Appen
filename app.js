@@ -326,6 +326,8 @@ let map3d = null;
 let map3dMarker = null;
 let mapMode = "3d"; // always 3d by default
 let map3dTrailSourceReady = false;
+let followMode = true; // Pokemon-Go style follow camera
+let lastBearing = -18;
 
 // Motion sensor (anti-cheat helper)
 let motion = {
@@ -358,6 +360,23 @@ let session = {
 let snapWatchId = null;
 let hasCenteredInitially = false;
 let lastGeoError = null; // { code, message, at }
+
+let weather = {
+  lastFetchAt: 0,
+  mode: "clear", // clear | rain | snow
+  intensity: 0, // 0..1
+  cloud: 0, // 0..1
+};
+
+let weatherFx = {
+  canvas: null,
+  ctx: null,
+  w: 0,
+  h: 0,
+  drops: [],
+  running: false,
+  raf: 0,
+};
 
 function maptilerKey() {
   const fromUrl = new URLSearchParams(location.search).get("maptilerKey");
@@ -437,6 +456,7 @@ function ensureMap3D() {
     antialias: true,
     pixelRatio: Math.min(2, window.devicePixelRatio || 1),
   });
+  lastBearing = -18;
 
   map3d.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
   map3d.addControl(
@@ -545,6 +565,41 @@ function ensureMap3D() {
     } catch {
       map3dTrailSourceReady = false;
     }
+  });
+}
+
+function bearingDeg(from, to) {
+  // from/to: {lat,lng}
+  const toRad = (x) => (x * Math.PI) / 180;
+  const toDeg = (x) => (x * 180) / Math.PI;
+  const lat1 = toRad(from.lat);
+  const lat2 = toRad(to.lat);
+  const dLon = toRad(to.lng - from.lng);
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  const brng = toDeg(Math.atan2(y, x));
+  return (brng + 360) % 360;
+}
+
+function update3DCamera(latlng) {
+  if (!map3d) return;
+  if (!followMode) return;
+  const prev = session.lastPos?.latlng;
+  if (prev) {
+    const b = bearingDeg(prev, latlng);
+    // smooth bearing changes
+    const delta = ((b - lastBearing + 540) % 360) - 180;
+    lastBearing = (lastBearing + delta * 0.22 + 360) % 360;
+  }
+  const speed = session.lastSpeedMps ?? 0;
+  const targetZoom = speed > 4 ? 16.2 : 16.6; // a bit more zoomed-in when walking
+  map3d.easeTo({
+    center: [latlng.lng, latlng.lat],
+    bearing: lastBearing,
+    pitch: 62,
+    zoom: Math.max(map3d.getZoom(), targetZoom),
+    duration: 380,
+    essential: true,
   });
 }
 
@@ -871,12 +926,163 @@ function applyBonusMultiplier(dateKey, basePoints) {
   return basePoints;
 }
 
+function initWeatherFx() {
+  if (weatherFx.canvas) return;
+  const canvas = document.querySelector("#weather-fx");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d", { alpha: true });
+  weatherFx.canvas = canvas;
+  weatherFx.ctx = ctx;
+
+  const resize = () => {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    weatherFx.w = Math.max(1, Math.round(rect.width * dpr));
+    weatherFx.h = Math.max(1, Math.round(rect.height * dpr));
+    canvas.width = weatherFx.w;
+    canvas.height = weatherFx.h;
+  };
+  resize();
+  window.addEventListener("resize", resize, { passive: true });
+
+  // init particles
+  weatherFx.drops = [];
+  for (let i = 0; i < 180; i++) weatherFx.drops.push(spawnDrop());
+  startWeatherFxLoop();
+}
+
+function spawnDrop() {
+  return {
+    x: Math.random(),
+    y: Math.random(),
+    z: Math.random(), // depth
+    v: 0.8 + Math.random() * 1.6,
+  };
+}
+
+function startWeatherFxLoop() {
+  if (weatherFx.running) return;
+  weatherFx.running = true;
+  const tick = () => {
+    weatherFx.raf = requestAnimationFrame(tick);
+    drawWeatherFx();
+  };
+  tick();
+}
+
+function drawWeatherFx() {
+  const ctx = weatherFx.ctx;
+  if (!ctx) return;
+  const w = weatherFx.w;
+  const h = weatherFx.h;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Cloud tint
+  const cloud = clamp(weather.cloud ?? 0, 0, 1);
+  if (cloud > 0.05) {
+    ctx.fillStyle = `rgba(200,220,255,${0.08 * cloud})`;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  const mode = weather.mode;
+  const intensity = clamp(weather.intensity ?? 0, 0, 1);
+  if (intensity <= 0.03) return;
+
+  const count = Math.floor(40 + intensity * 220);
+  ctx.save();
+  ctx.lineCap = "round";
+
+  if (mode === "rain") {
+    ctx.strokeStyle = `rgba(185,220,255,${0.32 + 0.35 * intensity})`;
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < Math.min(count, weatherFx.drops.length); i++) {
+      const d = weatherFx.drops[i];
+      const x = d.x * w;
+      const y = d.y * h;
+      const len = (10 + d.z * 16) * (0.9 + intensity);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - len * 0.25, y + len);
+      ctx.stroke();
+      d.y += (0.006 + d.v * 0.0025) * (0.7 + intensity);
+      d.x += -0.001 * (0.4 + intensity);
+      if (d.y > 1.08) {
+        d.y = -0.05;
+        d.x = Math.random();
+        d.z = Math.random();
+        d.v = 0.8 + Math.random() * 1.6;
+      }
+    }
+  } else if (mode === "snow") {
+    ctx.fillStyle = `rgba(255,255,255,${0.35 + 0.35 * intensity})`;
+    for (let i = 0; i < Math.min(count, weatherFx.drops.length); i++) {
+      const d = weatherFx.drops[i];
+      const x = d.x * w;
+      const y = d.y * h;
+      const r = (1.2 + d.z * 2.6) * (0.9 + intensity * 0.3);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      d.y += (0.0025 + d.v * 0.0014) * (0.7 + intensity);
+      d.x += Math.sin((Date.now() / 600) + d.z * 6) * 0.0009;
+      if (d.y > 1.08) {
+        d.y = -0.05;
+        d.x = Math.random();
+        d.z = Math.random();
+        d.v = 0.8 + Math.random() * 1.6;
+      }
+    }
+  }
+
+  ctx.restore();
+}
+
+async function maybeFetchWeather(latlng) {
+  const now = Date.now();
+  if (now - (weather.lastFetchAt ?? 0) < 120_000) return; // every 2 min
+  weather.lastFetchAt = now;
+
+  try {
+    const url =
+      `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(latlng.lat)}` +
+      `&longitude=${encodeURIComponent(latlng.lng)}` +
+      `&current=precipitation,rain,showers,snowfall,cloud_cover,weather_code` +
+      `&timezone=auto`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data = await res.json();
+    const cur = data?.current;
+    if (!cur) return;
+    const precip = Number(cur.precipitation ?? 0);
+    const rain = Number(cur.rain ?? 0) + Number(cur.showers ?? 0);
+    const snow = Number(cur.snowfall ?? 0);
+    const cloud = clamp(Number(cur.cloud_cover ?? 0) / 100, 0, 1);
+
+    if (snow > 0.01) {
+      weather.mode = "snow";
+      weather.intensity = clamp(snow / 3, 0.1, 1);
+    } else if (rain > 0.01 || precip > 0.01) {
+      weather.mode = "rain";
+      weather.intensity = clamp((rain || precip) / 6, 0.1, 1);
+    } else {
+      weather.mode = "clear";
+      weather.intensity = 0;
+    }
+    weather.cloud = cloud;
+  } catch {
+    // ignore
+  }
+}
+
 function onPosition(pos) {
   const { latitude, longitude, accuracy, speed } = pos.coords;
   const ts = pos.timestamp || Date.now();
   const latlng = { lat: latitude, lng: longitude };
 
   ensureMap();
+  initWeatherFx();
+  maybeFetchWeather(latlng);
   // Snap Map-like offline location memory (always store last known + trail locally)
   pushTrailPoint(latlng, ts, accuracy);
 
@@ -885,7 +1091,7 @@ function onPosition(pos) {
     session.lastAcceptedPos = { latlng, ts };
     if (mapMode === "3d") {
       map3dMarker?.setLngLat([latlng.lng, latlng.lat]);
-      map3d?.jumpTo({ center: [latlng.lng, latlng.lat], zoom: 16 });
+      update3DCamera(latlng);
       renderTrailOn3D();
     } else {
       avatarMarker.setLatLng(latlng);
@@ -923,6 +1129,7 @@ function onPosition(pos) {
 
   if (mapMode === "3d") {
     map3dMarker?.setLngLat([latlng.lng, latlng.lat]);
+    update3DCamera(latlng);
     renderTrailOn3D();
   } else {
     avatarMarker.setLatLng(latlng);
@@ -1257,6 +1464,12 @@ function initPlayControls() {
     updateStatsUi();
   });
   $("#btn-center")?.addEventListener("click", centerOnAvatar);
+  $("#btn-follow")?.addEventListener("click", () => {
+    followMode = !followMode;
+    const b = document.querySelector("#btn-follow");
+    if (b) b.textContent = followMode ? "Følg: På" : "Følg: Av";
+    if (followMode && session.lastPos?.latlng && mapMode === "3d") update3DCamera(session.lastPos.latlng);
+  });
   $("#btn-panel")?.addEventListener("click", () => {
     const play = document.querySelector(".play");
     if (!play) return;
