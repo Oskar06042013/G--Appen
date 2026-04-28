@@ -400,6 +400,32 @@
     ></script>
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" crossorigin=""></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
+    <script>
+      // Failsafe: if app.js crashes, prevent form-submit reload and show error.
+      (function () {
+        function show(msg) {
+          var el = document.getElementById("location-debug");
+          if (el) el.textContent = msg;
+        }
+        window.addEventListener("error", function (e) {
+          show("App-feil: " + (e && e.message ? e.message : "ukjent feil"));
+        });
+        window.addEventListener("unhandledrejection", function (e) {
+          var r = e && e.reason ? (e.reason.message || String(e.reason)) : "ukjent";
+          show("App-feil: " + r);
+        });
+        window.addEventListener("load", function () {
+          var form = document.getElementById("onboarding-form");
+          if (!form) return;
+          form.addEventListener("submit", function (evt) {
+            // If app.js loaded, it will call preventDefault itself.
+            // This only stops a hard reload if app.js didn't attach.
+            evt.preventDefault();
+            show("Tips: Hvis du ikke kommer inn i spillet, er det en app-feil. Se meldingen her.");
+          });
+        });
+      })();
+    </script>
     <script src="./app.js"></script>
     <script>
       if ("serviceWorker" in navigator) {
