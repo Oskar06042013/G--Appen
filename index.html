@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="no">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gå Appen</title>
+    <meta name="theme-color" content="#0b1020" />
+    <meta name="description" content="Gå Appen: gå eller sykle til skolen, få poeng og vinn i kommunen/skolen." />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      crossorigin=""
+    />
+  </head>
+  <body>
+    <header class="header">
+      <div class="container header__inner">
+        <div class="brand">
+          <div class="brand__logo" aria-hidden="true">GÅ</div>
+          <div class="brand__text">
+            <div class="brand__name">Gå Appen</div>
+            <div class="brand__tagline">Gå eller sykle til skolen — vinn i kommunen din</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <button class="nav__btn" data-view="play">Spill</button>
+          <button class="nav__btn" data-view="school">Skole</button>
+          <button class="nav__btn" data-view="profile">Profil</button>
+          <button class="nav__btn" data-view="about">Om</button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container main">
+      <section id="view-onboarding" class="view">
+        <div class="card">
+          <h1>Kom i gang</h1>
+          <p class="muted">
+            Registrer deg med kommune og skole. Data lagres bare lokalt i nettleseren din i denne demoen.
+          </p>
+
+          <form id="onboarding-form" class="form">
+            <div class="grid">
+              <label class="field">
+                <span class="field__label">Kommune</span>
+                <input name="kommune" autocomplete="address-level2" required placeholder="F.eks. Oslo" />
+              </label>
+              <label class="field">
+                <span class="field__label">Skole</span>
+                <input name="skole" autocomplete="organization" required placeholder="F.eks. Linderud skole" />
+              </label>
+              <label class="field">
+                <span class="field__label">Telefonnummer</span>
+                <input
+                  name="tlf"
+                  inputmode="tel"
+                  autocomplete="tel"
+                  required
+                  placeholder="F.eks. 99 99 99 99"
+                />
+              </label>
+              <label class="field">
+                <span class="field__label">E-post</span>
+                <input name="epost" type="email" autocomplete="email" required placeholder="navn@epost.no" />
+              </label>
+            </div>
+
+            <label class="checkbox">
+              <input id="consent" type="checkbox" required />
+              <span>
+                Jeg godtar at nettstedet bruker GPS mens jeg spiller (for å telle poeng ved gåing/sykling).
+              </span>
+            </label>
+
+            <div class="actions">
+              <button class="btn btn--primary" type="submit">Start</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section id="view-play" class="view" hidden>
+        <div class="play">
+          <div class="play__map">
+            <div id="map" class="map" aria-label="Kart"></div>
+          </div>
+
+          <aside class="play__panel" aria-label="Poeng og kontrollpanel">
+            <div class="card play__card">
+              <div class="row row--space">
+                <div>
+                  <div class="eyebrow muted">Spill</div>
+                  <div class="panel__title">Gå Appen</div>
+                  <div class="muted" id="player-subtitle"></div>
+                </div>
+                <div class="pill" id="session-status">Ikke aktiv</div>
+              </div>
+
+              <div class="stats">
+                <div class="stat">
+                  <div class="stat__label">Poeng i dag</div>
+                  <div class="stat__value" id="points-today">0</div>
+                </div>
+                <div class="stat">
+                  <div class="stat__label">Distanse (aktiv)</div>
+                  <div class="stat__value" id="distance-active">0.00 km</div>
+                </div>
+                <div class="stat">
+                  <div class="stat__label">Aktivitet</div>
+                  <div class="stat__value" id="activity-type">—</div>
+                </div>
+              </div>
+
+              <div class="stats stats--2">
+                <div class="stat">
+                  <div class="stat__label">Bevegelse (sensor)</div>
+                  <div class="stat__value" id="motion-status">—</div>
+                </div>
+                <div class="stat">
+                  <div class="stat__label">Bonus</div>
+                  <div class="stat__value" id="bonus-status">Ingen</div>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button class="btn btn--primary" id="btn-start">Start dagens tur</button>
+                <button class="btn" id="btn-stop" disabled>Stopp</button>
+                <button class="btn btn--ghost" id="btn-center">Sentrer</button>
+                <button class="btn btn--ghost" id="btn-refresh-location" type="button">Oppdater posisjon</button>
+                <button class="btn btn--ghost" id="btn-toggle-trail" type="button">Spor: På</button>
+                <button class="btn btn--danger" id="btn-clear-trail" type="button">Slett spor</button>
+              </div>
+
+              <div class="panel__hint muted" id="location-status">Posisjon: ikke oppdatert ennå</div>
+              <div class="notice" id="motivation" role="status" aria-live="polite"></div>
+
+              <details class="details">
+                <summary>Hvis posisjon ikke fungerer</summary>
+                <ul>
+                  <li>Trykk <strong>Oppdater posisjon</strong> og velg <strong>Tillat</strong>.</li>
+                  <li>På Windows: slå på <strong>Stedstjenester</strong> i Innstillinger.</li>
+                  <li>I nettleser: sjekk at nettstedet har <strong>posisjonstillatelse</strong>.</li>
+                  <li>GPS er ofte best på mobil.</li>
+                </ul>
+                <div class="muted" id="location-debug" style="margin-top:10px"></div>
+              </details>
+
+              <details class="details">
+                <summary>3D-kart (nøkkel)</summary>
+                <p class="muted" style="margin-top:10px">
+                  For å få satellitt + 3D-bygg trenger du en gratis MapTiler-nøkkel.
+                </p>
+                <div class="actions" style="margin-top:10px">
+                  <input id="maptiler-key" placeholder="Lim inn MapTiler key…" />
+                  <button class="btn btn--primary" id="btn-save-key" type="button">Lagre</button>
+                </div>
+                <p class="muted" style="margin-top:10px">
+                  Lag key her: <a href="https://www.maptiler.com/cloud/" target="_blank" rel="noreferrer">maptiler.com</a>
+                </p>
+              </details>
+
+              <details class="details">
+                <summary>Poengregler</summary>
+                <ul>
+                  <li>Poeng teller kun ved <strong>gåing</strong> og <strong>sykling</strong>.</li>
+                  <li>Ved høy fart (bil/buss/tog/sparkesykkel) får du <strong>0 poeng</strong>.</li>
+                  <li>Sensor brukes for å redusere juks.</li>
+                  <li>Bonus: <strong>5 km på 3 dager</strong> gir <strong>dobbel poeng</strong> i 3 dager.</li>
+                </ul>
+              </details>
+
+              <div class="panel__hint muted">Tips: På mobil må du gi posisjon/sensor-tilgang.</div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="view-school" class="view" hidden>
+        <div class="card">
+          <div class="row row--space">
+            <div>
+              <h2>Skole</h2>
+              <p class="muted">
+                Hver 3. måned kåres en vinner på skolen. I denne web-demoen er dette lokalt – i ekte versjon må dette være
+                en delt server-løsning.
+              </p>
+            </div>
+            <div class="pill" id="season-pill">Sesong</div>
+          </div>
+
+          <div class="grid-2">
+            <div class="card card--soft">
+              <h3>Vinner (denne sesongen)</h3>
+              <div class="notice is-good" id="winner-box" role="status" aria-live="polite"></div>
+              <div class="actions">
+                <button class="btn" id="btn-publish-score">Publiser poeng til “skole”</button>
+                <button class="btn btn--ghost" id="btn-tv">TV-modus (fullskjerm)</button>
+              </div>
+            </div>
+            <div class="card card--soft">
+              <h3>Toppliste (demo)</h3>
+              <div id="leaderboard" class="leaderboard"></div>
+              <div class="muted" style="margin-top:10px">
+                Proff versjon: innlogging + anti-juks på server + visning på storskjerm på skolen.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-profile" class="view" hidden>
+        <div class="card">
+          <div class="row row--space">
+            <div>
+              <h2>Profil</h2>
+              <p class="muted">Se og endre registreringen din.</p>
+            </div>
+            <button class="btn btn--danger" id="btn-reset">Nullstill</button>
+          </div>
+
+          <form id="profile-form" class="form">
+            <div class="grid">
+              <label class="field">
+                <span class="field__label">Kommune</span>
+                <input name="kommune" required />
+              </label>
+              <label class="field">
+                <span class="field__label">Skole</span>
+                <input name="skole" required />
+              </label>
+              <label class="field">
+                <span class="field__label">Telefonnummer</span>
+                <input name="tlf" required />
+              </label>
+              <label class="field">
+                <span class="field__label">E-post</span>
+                <input name="epost" type="email" required />
+              </label>
+            </div>
+
+            <div class="actions">
+              <button class="btn btn--primary" type="submit">Lagre</button>
+            </div>
+          </form>
+
+          <hr class="sep" />
+
+          <div class="grid-2">
+            <div class="card card--soft">
+              <h3>Resultater</h3>
+              <div class="list">
+                <div class="list__row">
+                  <div class="muted">Totale poeng</div>
+                  <div id="points-total" class="strong">0</div>
+                </div>
+                <div class="list__row">
+                  <div class="muted">Streak (dager)</div>
+                  <div id="streak" class="strong">0</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card card--soft">
+              <h3>Demo “kommunekonkurranse”</h3>
+              <p class="muted">
+                I en ekte løsning sendes poeng til en server og rangeres per kommune/skole. Her er det bare en lokal demo.
+              </p>
+              <button class="btn" id="btn-fake-win">Simuler “du vant i kommunen”</button>
+              <div class="notice" id="win-notice" role="status" aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-about" class="view" hidden>
+        <div class="card">
+          <h2>Om Gå Appen</h2>
+          <p>
+            Målet er å få flere til å <strong>gå eller sykle til skolen</strong> i stedet for å bli kjørt. Du aktiverer
+            “dagens tur” og får poeng når du beveger deg i et tempo som tilsvarer gåing eller sykling.
+          </p>
+          <div class="card card--soft">
+            <h3>Hva som kommer i neste steg (hvis du vil)</h3>
+            <ul>
+              <li>Innlogging og ekte konkurranse per kommune/skole</li>
+              <li>Bedre aktivitetsdeteksjon (sensorer + maskinlæring)</li>
+              <li>Belønninger, badges og daglige oppdrag</li>
+              <li>Personvern: dataminimering og foreldresamtykke for elever</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer__inner">
+        <span class="muted">Gå Appen (web demo) • laget i Cursor</span>
+      </div>
+    </footer>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" crossorigin=""></script>
+    <script src="./app.js"></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("./sw.js").catch(() => {});
+        });
+      }
+    </script>
+  </body>
+</html>
