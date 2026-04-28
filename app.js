@@ -593,11 +593,11 @@ function bearingDeg(from, to) {
   return (brng + 360) % 360;
 }
 
-function update3DCamera(latlng) {
+function update3DCamera(latlng, prevLatLng) {
   if (!map3d) return;
   if (!followMode) return;
-  const prev = session.lastPos?.latlng;
-  if (prev) {
+  const prev = prevLatLng || session.lastPos?.latlng;
+  if (prev && (prev.lat !== latlng.lat || prev.lng !== latlng.lng)) {
     const b = bearingDeg(prev, latlng);
     // smooth bearing changes
     const delta = ((b - lastBearing + 540) % 360) - 180;
@@ -1103,7 +1103,7 @@ function onPosition(pos) {
     session.lastAcceptedPos = { latlng, ts };
     if (mapMode === "3d") {
       map3dMarker?.setLngLat([latlng.lng, latlng.lat]);
-      update3DCamera(latlng);
+      update3DCamera(latlng, null);
       renderTrailOn3D();
     } else {
       avatarMarker.setLatLng(latlng);
@@ -1117,6 +1117,7 @@ function onPosition(pos) {
   }
 
   const prev = session.lastPos;
+  const prevLatLng = prev?.latlng;
   session.lastPos = { latlng, ts, speed, accuracy };
 
   const dt = Math.max(1, (ts - prev.ts) / 1000);
@@ -1141,7 +1142,7 @@ function onPosition(pos) {
 
   if (mapMode === "3d") {
     map3dMarker?.setLngLat([latlng.lng, latlng.lat]);
-    update3DCamera(latlng);
+    update3DCamera(latlng, prevLatLng);
     renderTrailOn3D();
   } else {
     avatarMarker.setLatLng(latlng);
