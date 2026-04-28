@@ -1,7 +1,88 @@
-/* global L, maplibregl */
+/* global L, maplibregl, supabase */
 
 const STORAGE_KEY = "gaAppen_v1";
 const MAPTILER_STORAGE_KEY = "gaAppen_maptiler_key";
+const SUPABASE_STORAGE_KEY = "gaAppen_supabase_v1"; // { url, anon }
+
+let sb = null;
+
+function loadSupabaseConfig() {
+  try {
+    const raw = localStorage.getItem(SUPABASE_STORAGE_KEY);
+    if (!raw) return null;
+    const cfg = JSON.parse(raw);
+    if (!cfg?.url || !cfg?.anon) return null;
+    return { url: String(cfg.url), anon: String(cfg.anon) };
+  } catch {
+    return null;
+  }
+}
+
+function saveSupabaseConfig(cfg) {
+  localStorage.setItem(SUPABASE_STORAGE_KEY, JSON.stringify(cfg));
+}
+
+function clearSupabaseConfig() {
+  localStorage.removeItem(SUPABASE_STORAGE_KEY);
+}
+
+function ensureSupabase() {
+  const cfg = loadSupabaseConfig();
+  if (!cfg) {
+    sb = null;
+    return null;
+  }
+  if (!supabase?.createClient) {
+    sb = null;
+    return null;
+  }
+  if (sb) return sb;
+  sb = supabase.createClient(cfg.url, cfg.anon, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+  });
+  return sb;
+}
+
+function updateSupabaseUi() {
+  const cfg = loadSupabaseConfig();
+  const status = document.querySelector("#sb-status");
+  if (status) status.textContent = cfg ? "Konfigurert (klar til online toppliste)" : "Ikke konfigurert";
+}
+
+async function updateAuthUi() {
+  const status = document.querySelector("#auth-status");
+  const client = ensureSupabase();
+  if (!status) return;
+  if (!client) {
+    status.textContent = "Konfigurer Supabase først";
+    return;
+  }
+  const { data } = await client.auth.getSession();
+  const email = data?.session?.user?.email;
+  status.textContent = email ? `Innlogget: ${email}` : "Ikke innlogget";
+}
+
+async function ensureProfileInSupabase(displayNameOverride) {
+  const client = ensureSupabase();
+  if (!client || !state.profile) return;
+  const { data: sess } = await client.auth.getSession();
+  const user = sess?.session?.user;
+  if (!user) return;
+
+  const displayName =
+    (displayNameOverride && String(displayNameOverride).trim()) ||
+    (state.profile.epost ? String(state.profile.epost).split("@")[0] : "spiller");
+
+  const row = {
+    id: user.id,
+    display_name: displayName,
+    email: user.email ?? null,
+    kommune: state.profile.kommune,
+    skole: state.profile.skole,
+  };
+
+  await client.from("profiles").upsert(row, { onConflict: "id" });
+}
 
 function nowIsoDate() {
   const d = new Date();
@@ -963,6 +1044,70 @@ function initOnboarding() {
 }
 
 function initProfile() {
+  // Supabase config UI
+  const cfg = loadSupabaseConfig();
+  const urlEl = document.querySelector("#sb-url");
+  const anonEl = document.querySelector("#sb-anon");
+  if (urlEl) urlEl.value = cfg?.url ?? "";
+  if (anonEl) anonEl.value = cfg?.anon ?? "";
+  document.querySelector("#btn-sb-save")?.addEventListener("click", () => {
+    const url = String(document.querySelector("#sb-url")?.value || "").trim();
+    const anon = String(document.querySelector("#sb-anon")?.value || "").trim();
+    if (!url || !anon) return;
+    saveSupabaseConfig({ url, anon });
+    sb = null;
+    ensureSupabase();
+    updateSupabaseUi();
+    setNotice(document.querySelector("#win-notice"), "Supabase lagret. Klar for online toppliste.", "is-good");
+  });
+  document.querySelector("#btn-sb-clear")?.addEventListener("click", () => {
+    clearSupabaseConfig();
+    sb = null;
+    updateSupabaseUi();
+    setNotice(document.querySelector("#win-notice"), "Supabase fjernet (tilbake til lokal demo).", "is-good");
+    updateAuthUi();
+  });
+  updateSupabaseUi();
+
+  // Auth UI (email OTP / magic link)
+  const authEmail = document.querySelector("#auth-email");
+  const authName = document.querySelector("#auth-name");
+  if (authEmail && state.profile?.epost) authEmail.value = state.profile.epost;
+  if (authName && state.profile?.epost) authName.value = String(state.profile.epost).split("@")[0] || "";
+
+  document.querySelector("#btn-auth-login")?.addEventListener("click", async () => {
+    const client = ensureSupabase();
+    if (!client) {
+      setNotice(document.querySelector("#win-notice"), "Konfigurer Supabase først.", "is-warn");
+      return;
+    }
+    const email = String(authEmail?.value || "").trim();
+    if (!email) return;
+    const redirectTo = `${location.origin}${location.pathname}`;
+    const { error } = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
+    if (error) {
+      setNotice(document.querySelector("#win-notice"), `Innlogging feilet: ${error.message}`, "is-warn");
+      return;
+    }
+    setNotice(document.querySelector("#win-notice"), "Sjekk e-posten din for innloggingslink.", "is-good");
+    await updateAuthUi();
+  });
+
+  document.querySelector("#btn-auth-logout")?.addEventListener("click", async () => {
+    const client = ensureSupabase();
+    if (!client) return;
+    await client.auth.signOut();
+    setNotice(document.querySelector("#win-notice"), "Logget ut.", "is-good");
+    await updateAuthUi();
+  });
+
+  // Keep status fresh
+  updateAuthUi();
+  ensureSupabase()?.auth.onAuthStateChange(async () => {
+    await updateAuthUi();
+    await ensureProfileInSupabase(String(authName?.value || ""));
+  });
+
   const form = $("#profile-form");
   if (form) {
     form.addEventListener("submit", (e) => {
@@ -979,6 +1124,7 @@ function initProfile() {
       saveState(state);
       updateHeaderSubtitle();
       setNotice($("#win-notice"), "Profil lagret.", "is-good");
+      ensureProfileInSupabase(String(authName?.value || ""));
     });
   }
 
@@ -1153,7 +1299,7 @@ function updateStableSpeedHeuristic(speedMps, dt) {
   motion.stableHighSpeedSeconds = clamp(motion.stableHighSpeedSeconds, 0, 180);
 }
 
-function renderSchool() {
+async function renderSchool() {
   const dateKey = nowIsoDate();
   const seasonKey = seasonKeyFromDate(dateKey);
   const seasonPill = $("#season-pill");
@@ -1170,16 +1316,28 @@ function renderSchool() {
   }
 
   const school = state.profile?.skole ?? "";
-  const rows = (state.school?.publishedScores ?? [])
-    .filter((r) => r.seasonKey === seasonKey && r.school === school)
-    .sort((a, b) => b.points - a.points)
-    .slice(0, 10);
+  const online = ensureSupabase();
+  const onlineRows = online ? await fetchSchoolLeaderboardFromSupabase(seasonKey, school) : null;
+  const rows = onlineRows
+    ? onlineRows
+    : (state.school?.publishedScores ?? [])
+        .filter((r) => r.seasonKey === seasonKey && r.school === school)
+        .sort((a, b) => b.points - a.points)
+        .slice(0, 10);
 
   const winnerBox = $("#winner-box");
   if (winnerBox) {
     if (!school) winnerBox.textContent = "Registrer skole i Profil først.";
     else if (rows.length === 0) winnerBox.textContent = "Ingen publiserte poeng ennå. Trykk “Publiser poeng” i denne demoen.";
-    else winnerBox.textContent = `🏆 ${rows[0].name} leder med ${rows[0].points} poeng.`;
+    else {
+      winnerBox.textContent = `🏆 ${rows[0].name} leder med ${rows[0].points} poeng.`;
+      if (online) {
+        const w = await fetchSeasonWinnerFromSupabase(seasonKey, school);
+        if (w) {
+          winnerBox.textContent = `🏆 ${w.name} leder med ${w.points} poeng • ${(w.activeMeters / 1000).toFixed(2)} km`;
+        }
+      }
+    }
   }
 
   const lb = $("#leaderboard");
@@ -1201,6 +1359,48 @@ function renderSchool() {
       lb.appendChild(el);
     });
   }
+}
+
+async function fetchSchoolLeaderboardFromSupabase(seasonKey, school) {
+  const client = ensureSupabase();
+  if (!client || !school) return null;
+  const { data, error } = await client
+    .from("season_scores")
+    .select("points, active_meters, season_key, skole, kommune, user_id, profiles(display_name)")
+    .eq("season_key", seasonKey)
+    .eq("skole", school)
+    .order("points", { ascending: false })
+    .limit(10);
+  if (error) return null;
+  return (data ?? []).map((r) => ({
+    name: r.profiles?.display_name ?? "spiller",
+    school: r.skole,
+    kommune: r.kommune,
+    seasonKey: r.season_key,
+    points: r.points ?? 0,
+    activeMeters: r.active_meters ?? 0,
+  }));
+}
+
+async function fetchSeasonWinnerFromSupabase(seasonKey, school) {
+  const client = ensureSupabase();
+  if (!client || !school) return null;
+  // Uses the view from README (season_winners). If not created, this will fail silently.
+  const { data, error } = await client
+    .from("season_winners")
+    .select("season_key, skole, kommune, user_id, points, active_meters, profiles(display_name)")
+    .eq("season_key", seasonKey)
+    .eq("skole", school)
+    .limit(1)
+    .maybeSingle();
+  if (error) return null;
+  if (!data) return null;
+  return {
+    name: data.profiles?.display_name ?? "spiller",
+    points: data.points ?? 0,
+    activeMeters: data.active_meters ?? 0,
+    kommune: data.kommune ?? "",
+  };
 }
 
 function escapeHtml(s) {
@@ -1287,24 +1487,53 @@ function boot() {
 
     const dateKey = nowIsoDate();
     const seasonKey = seasonKeyFromDate(dateKey);
-    const name = (state.profile.epost || "spiller").split("@")[0] || "spiller";
     const school = state.profile.skole;
     const kommune = state.profile.kommune;
     const points = state.totals.pointsTotal ?? 0;
+    const seasonStats = calcSeasonStats(state, seasonKey);
 
-    const entry = {
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      name,
-      school,
-      kommune,
-      seasonKey,
-      points,
-    };
-    state.school.publishedScores = [...(state.school.publishedScores ?? []).filter((r) => r.name !== name), entry];
-    saveState(state);
-    setView("school");
-    renderSchool();
-    setNotice($("#winner-box"), "Publisert! (Demo: lagres bare lokalt)", "is-good");
+    const client = ensureSupabase();
+    if (client) {
+      const { data: sess } = await client.auth.getSession();
+      const user = sess?.session?.user;
+      if (!user) {
+        setNotice($("#winner-box"), "Logg inn først (Profil → Innlogging).", "is-warn");
+        return;
+      }
+      await ensureProfileInSupabase();
+      const row = {
+        user_id: user.id,
+        season_key: seasonKey,
+        skole: school,
+        kommune: kommune,
+        points: seasonStats.points,
+        active_meters: Math.round(seasonStats.activeMeters),
+      };
+      const { error } = await client.from("season_scores").upsert(row, { onConflict: "user_id,season_key" });
+      if (error) {
+        setNotice($("#winner-box"), `Kunne ikke publisere: ${error.message}`, "is-warn");
+        return;
+      }
+      setView("school");
+      await renderSchool();
+      setNotice($("#winner-box"), "Publisert til online toppliste!", "is-good");
+    } else {
+      const name = (state.profile.epost || "spiller").split("@")[0] || "spiller";
+      const entry = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name,
+        school,
+        kommune,
+        seasonKey,
+        points: seasonStats.points,
+        activeMeters: seasonStats.activeMeters,
+      };
+      state.school.publishedScores = [...(state.school.publishedScores ?? []).filter((r) => r.name !== name), entry];
+      saveState(state);
+      setView("school");
+      await renderSchool();
+      setNotice($("#winner-box"), "Publisert! (Demo: lagres bare lokalt)", "is-good");
+    }
   });
 
   $("#btn-tv")?.addEventListener("click", async () => {

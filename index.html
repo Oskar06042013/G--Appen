@@ -248,6 +248,48 @@
             <button class="btn btn--danger" id="btn-reset">Nullstill</button>
           </div>
 
+          <div class="card card--soft" style="margin-top:14px">
+            <h3>Innlogging (for toppliste)</h3>
+            <p class="muted">Logg inn med e-post så poengene dine kan vises i skolens toppliste.</p>
+            <div class="grid" style="margin-top:10px">
+              <label class="field">
+                <span class="field__label">E-post</span>
+                <input id="auth-email" type="email" placeholder="navn@epost.no" />
+              </label>
+              <label class="field">
+                <span class="field__label">Navn i toppliste</span>
+                <input id="auth-name" placeholder="F.eks. Oskar" />
+              </label>
+            </div>
+            <div class="actions" style="margin-top:10px">
+              <button class="btn btn--primary" id="btn-auth-login" type="button">Send innloggingslink</button>
+              <button class="btn btn--ghost" id="btn-auth-logout" type="button">Logg ut</button>
+            </div>
+            <div class="panel__hint muted" id="auth-status">Ikke innlogget</div>
+          </div>
+
+          <div class="card card--soft" style="margin-top:14px">
+            <h3>Online konkurranse (Supabase)</h3>
+            <p class="muted">
+              For ekte toppliste og vinner per skole må dere koble på en database. Lim inn Supabase URL + anon key.
+            </p>
+            <div class="grid" style="margin-top:10px">
+              <label class="field">
+                <span class="field__label">Supabase URL</span>
+                <input id="sb-url" placeholder="https://xxxxx.supabase.co" />
+              </label>
+              <label class="field">
+                <span class="field__label">Supabase anon key</span>
+                <input id="sb-anon" placeholder="eyJhbGciOi..." />
+              </label>
+            </div>
+            <div class="actions" style="margin-top:10px">
+              <button class="btn btn--primary" id="btn-sb-save" type="button">Lagre</button>
+              <button class="btn btn--ghost" id="btn-sb-clear" type="button">Fjern</button>
+            </div>
+            <div class="panel__hint muted" id="sb-status">Ikke konfigurert</div>
+          </div>
+
           <form id="profile-form" class="form">
             <div class="grid">
               <label class="field">
@@ -334,6 +376,7 @@
       crossorigin=""
     ></script>
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
     <script src="./app.js"></script>
     <script>
       if ("serviceWorker" in navigator) {
