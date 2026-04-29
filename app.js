@@ -496,6 +496,8 @@ function ensureMap3D() {
     }
   };
 
+  let rateLimitHits = 0;
+
   map3d = new maplibregl.Map({
     container: "map",
     // Satellite + labels, similar to “Google Earth”-look
@@ -522,7 +524,20 @@ function ensureMap3D() {
       /rate limit/i.test(msg) ||
       /quota/i.test(msg);
     if (isRate) {
-      fallbackTo2D("3D-kartet ble sperret (for mange forespørsler). Bytter til 2D-kart — du kan fortsatt gå og få poeng.");
+      rateLimitHits += 1;
+      // Prefer to keep 3D (as requested). Only auto-fallback after repeated blocks.
+      if (mot) {
+        setNotice(
+          mot,
+          "3D-kartet blir sperret akkurat nå (for mange forespørsler). Vent litt og trykk «Prøv 3D igjen», eller legg inn egen MapTiler-nøkkel. (Appen kan bytte til 2D hvis dette fortsetter.)",
+          "is-warn",
+        );
+      }
+      if (rateLimitHits >= 3) {
+        fallbackTo2D(
+          "3D-kartet ble sperret flere ganger (for mange forespørsler). Bytter til 2D-kart så du kan fortsette å spille.",
+        );
+      }
     }
   });
 
@@ -1907,6 +1922,23 @@ function boot() {
     if (ll) map3dMarker?.setLngLat([ll.lng, ll.lat]);
     setTimeout(() => map3d && map3d.resize(), 80);
     setNotice($("#motivation"), "3D-kart aktivert (satellitt).", "is-good");
+  });
+
+  $("#btn-try-3d")?.addEventListener("click", () => {
+    // Re-try 3D without needing to re-save key
+    if (map3d) {
+      try {
+        map3d.remove();
+      } catch {
+        // ignore
+      }
+      map3d = null;
+      map3dMarker = null;
+      map3dTrailSourceReady = false;
+    }
+    mapMode = "3d";
+    ensureMap3D();
+    setTimeout(() => map3d && map3d.resize(), 80);
   });
 
   // Motion setup
