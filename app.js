@@ -1307,6 +1307,16 @@ function initOnboarding() {
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
+    // Show a clear message on mobile if something is missing.
+    if (!form.checkValidity()) {
+      form.reportValidity?.();
+      const note = document.querySelector("#onboarding-note");
+      if (note) {
+        note.style.display = "block";
+        setNotice(note, "Sjekk at alle felt er fylt ut, og at du har huket av for GPS-samtykke.", "is-warn");
+      }
+      return;
+    }
     const fd = new FormData(form);
     const profile = {
       kommune: String(fd.get("kommune") || "").trim(),
