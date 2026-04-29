@@ -1,4 +1,4 @@
-const VERSION = "ga-appen-pwa-v37";
+const VERSION = "ga-appen-pwa-v41";
 
 // Cache only our own assets. (CDN tiles/libs are left to the browser.)
 const CORE_ASSETS = [
@@ -9,11 +9,12 @@ const CORE_ASSETS = [
   "./manifest.webmanifest",
   "./robots.txt",
   "./sitemap.xml",
+  "./icons/brand-hero.png",
   "./icons/pwa-180.png",
   "./icons/pwa-192.png",
   "./icons/pwa-512.png",
-  "./icons/icon.svg?v=8",
-  "./icons/icon-maskable.svg?v=8",
+  "./icons/icon.svg?v=10",
+  "./icons/icon-maskable.svg?v=10",
 ];
 
 self.addEventListener("install", (event) => {

@@ -1056,6 +1056,8 @@ function setView(view) {
   for (const btn of document.querySelectorAll(".nav__btn")) {
     btn.classList.toggle("is-active", btn.dataset.view === view);
   }
+  // Prevent the page from scrolling while using the map.
+  document.body.classList.toggle("is-play-view", view === "play");
 }
 
 function formatKm(m) {
@@ -1319,18 +1321,44 @@ function ensureMap() {
     return;
   }
   if (map) return;
-  map = L.map("map", { zoomControl: true });
+  // Disable zoom/fade animations to avoid visible “tile grid” seams on iOS while pinching.
+  map = L.map("map", {
+    zoomControl: true,
+    zoomAnimation: false,
+    fadeAnimation: false,
+    markerZoomAnimation: false,
+  });
   // Satellite-like fallback (no API key) so the screen is always a map.
   // Esri World Imagery is widely compatible in browsers.
   map2dLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     maxZoom: 19,
     detectRetina: true,
-    updateWhenIdle: false,
-    updateWhenZooming: true,
+    // Keep old tiles while zooming, then swap when finished → fewer seams.
+    updateWhenIdle: true,
+    updateWhenZooming: false,
     keepBuffer: 8,
     attribution:
       'Tiles &copy; <a href="https://www.esri.com/" target="_blank" rel="noreferrer">Esri</a> • Data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
   }).addTo(map);
+
+  // Stop map gestures from scrolling the page / triggering navigation taps.
+  try {
+    const c = map.getContainer();
+    if (c && L?.DomEvent) {
+      L.DomEvent.disableClickPropagation(c);
+      L.DomEvent.disableScrollPropagation(c);
+      // iOS Safari: prevent the page from moving while pinching/dragging inside the map.
+      c.addEventListener(
+        "touchmove",
+        (e) => {
+          e.preventDefault();
+        },
+        { passive: false },
+      );
+    }
+  } catch {
+    // ignore
+  }
 
   const start = { lat: 59.9139, lng: 10.7522 }; // Oslo fallback
   map.setView([start.lat, start.lng], 14);
