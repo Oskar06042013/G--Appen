@@ -471,6 +471,31 @@ function ensureMap3D() {
 
   $("#map")?.classList.add("is-3d");
 
+  const fallbackTo2D = (reason) => {
+    // Avoid repeated fallbacks / loops.
+    if (mapMode === "2d") return;
+    try {
+      map3d?.remove();
+    } catch {
+      // ignore
+    }
+    map3d = null;
+    map3dMarker = null;
+    map3dTrailSourceReady = false;
+    mapMode = "2d";
+    $("#map")?.classList.remove("is-3d");
+    ensureMap();
+    setTimeout(() => map && map.invalidateSize(), 60);
+    if (mot) {
+      setNotice(
+        mot,
+        reason ||
+          "3D-kartet ble midlertidig sperret (for mange forespørsler). Jeg byttet til 2D-kart så du kan fortsette å spille.",
+        "is-warn",
+      );
+    }
+  };
+
   map3d = new maplibregl.Map({
     container: "map",
     // Satellite + labels, similar to “Google Earth”-look
@@ -483,6 +508,23 @@ function ensureMap3D() {
     pixelRatio: Math.min(2, window.devicePixelRatio || 1),
   });
   lastBearing = -18;
+
+  // If MapTiler (or network) rate-limits, don't brick the app.
+  // MapLibre emits 'error' events for tile/style/source failures.
+  map3d.on("error", (evt) => {
+    const err = evt?.error;
+    const msg = String(err?.message || "");
+    const status = err?.status || err?.statusCode;
+    const isRate =
+      status === 429 ||
+      /429/.test(msg) ||
+      /too many requests/i.test(msg) ||
+      /rate limit/i.test(msg) ||
+      /quota/i.test(msg);
+    if (isRate) {
+      fallbackTo2D("3D-kartet ble sperret (for mange forespørsler). Bytter til 2D-kart — du kan fortsatt gå og få poeng.");
+    }
+  });
 
   map3d.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
   map3d.addControl(
