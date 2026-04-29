@@ -164,6 +164,18 @@ function defaultState() {
   };
 }
 
+/** Gamification må eksistere før vi bruker weekly/badges; ikke bruk `a?.b ??=` (ugyldig LHS i flere nettlesere). */
+function ensureGamification(s) {
+  if (!s.gamification || typeof s.gamification !== "object") {
+    s.gamification = { badges: [], weekly: {}, sessions: {} };
+  } else {
+    if (!s.gamification.weekly || typeof s.gamification.weekly !== "object") s.gamification.weekly = {};
+    if (!Array.isArray(s.gamification.badges)) s.gamification.badges = [];
+    if (!s.gamification.sessions || typeof s.gamification.sessions !== "object") s.gamification.sessions = {};
+  }
+  return s.gamification;
+}
+
 function getDaily(state, dateKey) {
   if (!state.daily[dateKey]) {
     state.daily[dateKey] = {
@@ -809,7 +821,7 @@ function updateStatsUi() {
 
   // Weekly challenge + badges
   const week = isoWeekKey(new Date());
-  const weekly = (state.gamification?.weekly ??= {});
+  const weekly = ensureGamification(state).weekly;
   if (!weekly[week]) {
     // Default weekly challenge (fast, simple): walk/bike 10 km this week
     weekly[week] = { challengeId: "weekly_10km", progress: 0, target: 10_000 };
@@ -833,7 +845,7 @@ function updateStatsUi() {
     weeklyEl.textContent = weekly[week].completedAt ? `Ferdig! (${km}/${tgt} km)` : `${km}/${tgt} km`;
   }
 
-  const badges = (state.gamification?.badges ??= []);
+  const badges = ensureGamification(state).badges;
   const badgeEl = $("#badge-count");
   if (badgeEl) badgeEl.textContent = String(badges.length);
 }
@@ -1198,7 +1210,7 @@ function onPosition(pos) {
 
       // Badge: 5 km in 3 days unlock (when bonus triggers)
       if (hasDoubleBonus(state, dateKey)) {
-        const badges = (state.gamification?.badges ??= []);
+        const badges = ensureGamification(state).badges;
         const id = `bonus_${state.bonuses.doubleUntil}`;
         if (!badges.some((b) => b.id === id)) {
           badges.push({ id, earnedAt: Date.now(), title: "Boost!" });
@@ -1506,7 +1518,7 @@ function initPlayControls() {
     }
 
     // Badge: first arrival of the day with >= 500m active
-    const badges = (state.gamification?.badges ??= []);
+    const badges = ensureGamification(state).badges;
     const badgeId = `arrival_${dateKey}`;
     if (gainedMeters >= 500 && !badges.some((b) => b.id === badgeId)) {
       badges.push({ id: badgeId, earnedAt: Date.now(), title: "Kom fram!" });
