@@ -1,4 +1,4 @@
-const VERSION = "ga-appen-pwa-v6";
+const VERSION = "ga-appen-pwa-v7";
 
 // Cache only our own assets. (CDN tiles/libs are left to the browser.)
 const CORE_ASSETS = [
@@ -7,11 +7,11 @@ const CORE_ASSETS = [
   "./styles.css",
   "./app.js",
   "./manifest.webmanifest",
-  "./icons/apple-touch-icon.png?v=4",
-  "./icons/icon-192.png?v=4",
-  "./icons/icon-512.png?v=4",
-  "./icons/icon.svg?v=4",
-  "./icons/icon-maskable.svg?v=4",
+  "./icons/pwa-180.png",
+  "./icons/pwa-192.png",
+  "./icons/pwa-512.png",
+  "./icons/icon.svg?v=5",
+  "./icons/icon-maskable.svg?v=5",
 ];
 
 self.addEventListener("install", (event) => {

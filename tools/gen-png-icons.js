@@ -164,10 +164,11 @@ const root = path.join(__dirname, "..");
 const iconsDir = path.join(root, "icons");
 if (!fs.existsSync(iconsDir)) fs.mkdirSync(iconsDir, { recursive: true });
 
+// Faste filnavn (uten ?v=) slik at iOS/Safari lettere henter nye filer når de endres.
 const sizes = [
-  ["apple-touch-icon.png", 180],
-  ["icon-192.png", 192],
-  ["icon-512.png", 512],
+  ["pwa-180.png", 180],
+  ["pwa-192.png", 192],
+  ["pwa-512.png", 512],
 ];
 
 for (const [name, sz] of sizes) {
