@@ -5,7 +5,7 @@
       <stop offset="1" stop-color="#29d8a1" />
     </linearGradient>
     <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity=".24" />
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".22" />
       <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
     </linearGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
@@ -13,29 +13,43 @@
     </filter>
   </defs>
 
+  <!-- App icon background -->
   <rect x="44" y="44" width="424" height="424" rx="132" fill="url(#bg)" filter="url(#shadow)" />
   <path d="M88 128 C 190 66, 328 64, 426 142" fill="none" stroke="url(#shine)" stroke-width="34" />
 
-  <circle cx="256" cy="264" r="132" fill="#0f1d3a" fill-opacity=".24" />
+  <!-- Soft focus plate -->
+  <circle cx="256" cy="270" r="136" fill="#0f1d3a" fill-opacity=".22" />
 
+  <!-- “Route” -->
   <path
-    d="M126 348 C 176 318, 214 286, 254 240 C 286 204, 328 176, 386 158"
+    d="M124 356 C 178 324, 220 290, 256 244 C 294 204, 338 178, 392 162"
     fill="none"
     stroke="#ffffff"
-    stroke-opacity=".9"
+    stroke-opacity=".92"
     stroke-width="18"
     stroke-linecap="round"
     stroke-dasharray="4 24"
   />
 
+  <!-- Map pin -->
   <path
-    d="M256 148
-       C 208 148, 170 186, 170 234
-       C 170 286, 214 338, 256 386
-       C 298 338, 342 286, 342 234
-       C 342 186, 304 148, 256 148 Z"
+    d="M256 142
+       C 210 142, 174 178, 174 224
+       C 174 278, 220 334, 256 380
+       C 292 334, 338 278, 338 224
+       C 338 178, 302 142, 256 142 Z"
     fill="#ffffff"
   />
-  <circle cx="256" cy="232" r="38" fill="#5875ff" />
+  <circle cx="256" cy="222" r="40" fill="#5b76ff" />
+
+  <!-- Walking person (simple, pro silhouette) -->
+  <g fill="#ffffff">
+    <circle cx="256" cy="214" r="12" />
+    <path d="M246 232 C 244 252, 252 264, 262 274 C 270 282, 268 294, 258 296 C 240 300, 226 282, 228 258 C 230 244, 236 236, 246 232 Z" />
+    <path d="M236 258 L214 288 C 208 296, 212 306, 222 308 C 228 310, 234 306, 238 300 L256 276 Z" />
+    <path d="M262 274 L292 300 C 300 306, 312 304, 316 294 C 318 288, 316 282, 310 278 L270 250 Z" />
+    <path d="M240 300 L222 338 C 218 346, 224 356, 234 356 C 240 356, 246 352, 248 346 L262 306 Z" />
+    <path d="M268 300 L282 340 C 286 350, 300 352, 306 344 C 310 338, 308 330, 302 324 L282 292 Z" />
+  </g>
 </svg>
 

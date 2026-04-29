@@ -23,13 +23,13 @@
       "purpose": "any"
     },
     {
-      "src": "./icons/icon.svg?v=6",
+      "src": "./icons/icon.svg?v=8",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "./icons/icon-maskable.svg?v=6",
+      "src": "./icons/icon-maskable.svg?v=8",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "maskable"

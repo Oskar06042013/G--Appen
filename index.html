@@ -6,9 +6,11 @@
     <title>Gå Appen</title>
     <meta name="theme-color" content="#0b1020" />
     <meta name="apple-mobile-web-app-title" content="Gå Appen" />
-    <meta name="description" content="Gå Appen: gå eller sykle til skolen, få poeng og vinn i kommunen/skolen." />
-    <link rel="manifest" href="./manifest.webmanifest?v=6" />
-    <link rel="icon" href="./icons/icon.svg?v=6" type="image/svg+xml" />
+    <meta name="description" content="Gå Appen: gå eller sykle til skolen, få poeng og vinn lokalt." />
+    <link rel="canonical" href="." />
+    <meta name="robots" content="index,follow" />
+    <link rel="manifest" href="./manifest.webmanifest?v=8" />
+    <link rel="icon" href="./icons/icon.svg?v=8" type="image/svg+xml" />
     <!-- iOS bruker PNG; faste nye filnavn (pwa-180) for å unngå evig hurtigbuffer -->
     <link rel="apple-touch-icon" href="./icons/pwa-180.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="./icons/pwa-180.png" />
@@ -31,7 +33,7 @@
         <div class="brand">
           <img
             class="brand__logo"
-            src="./icons/icon.svg?v=6"
+            src="./icons/icon.svg?v=8"
             width="42"
             height="42"
             alt=""
@@ -44,7 +46,8 @@
         </div>
         <nav class="nav">
           <button class="nav__btn" data-view="play">Spill</button>
-          <button class="nav__btn" data-view="school">Skole</button>
+          <button class="nav__btn" data-view="tasks">Oppgaver</button>
+          <button class="nav__btn" data-view="leaderboard">Toppliste</button>
           <button class="nav__btn" data-view="profile">Profil</button>
           <button class="nav__btn" data-view="about">Om</button>
         </nav>
@@ -52,43 +55,83 @@
     </header>
 
     <main class="container main">
+      <section id="view-splash" class="view" hidden>
+        <div class="splash" aria-label="Intro">
+          <div class="splash__text" aria-live="polite">Walk like a boss.</div>
+        </div>
+      </section>
+
+      <section id="view-loading" class="view" hidden>
+        <div class="loading" aria-label="Laster kart">
+          <div class="loading__card">
+            <div class="loading__spinner" aria-hidden="true"></div>
+            <div class="loading__title">Laster verden…</div>
+            <div class="loading__sub muted">Henter kart og posisjon</div>
+            <div id="loading-slogan" class="loading__slogan" aria-live="polite">Walk like a boss.</div>
+          </div>
+        </div>
+      </section>
+
       <section id="view-onboarding" class="view">
         <div class="card">
           <h1>Kom i gang</h1>
           <p class="muted">
-            Registrer deg med kommune og skole. Data lagres bare lokalt i nettleseren din i denne demoen.
+            Du trenger bare <strong>kommune</strong> og et <strong>navn</strong> (gjerne kallenavn). Resten er valgfritt.
+            Ingen chatter, ingen «følgere» — bare gøy med gåing og sykling.
           </p>
+
+          <div class="trust-card" role="region" aria-label="Trygghet">
+            <div class="trust-card__title"><span aria-hidden="true">🛡️</span> Trygghet (kort fortalt)</div>
+            <ul>
+              <li>
+                <strong>Poeng og kart</strong> lagres som standard <strong>på telefonen/nettleseren din</strong> — vi
+                selger ikke data, og vi viser ikke posisjonen din til andre.
+              </li>
+              <li>
+                <strong>Online toppliste</strong> er <strong>valgfritt</strong> og noe <strong>voksne kan skru på</strong>
+                senere (da kan det deles begrensede ting som poeng og navn i lista).
+              </li>
+              <li>
+                Du kan når som helst <strong>slette alt</strong> under Profil → <strong>Nullstill</strong>.
+              </li>
+            </ul>
+          </div>
+
+          <div class="notice is-good" id="onboarding-permissions" role="note" aria-live="polite">
+            <strong>Tips før du starter:</strong> Trykk <strong>Tillat</strong> på
+            <strong>Posisjon</strong> og <strong>Bevegelse</strong>, så kan appen telle poeng mens du går/sykler. Du kan
+            trekke tillatelse i telefoninnstillinger senere.
+          </div>
 
           <form id="onboarding-form" class="form" novalidate>
             <div class="grid">
               <label class="field">
                 <span class="field__label">Kommune</span>
+                <span class="field__hint">Brukes til lokal toppliste (ikke nøyaktig adresse).</span>
                 <input name="kommune" autocomplete="address-level2" required placeholder="F.eks. Oslo" />
               </label>
               <label class="field">
-                <span class="field__label">Skole</span>
-                <input name="skole" autocomplete="organization" required placeholder="F.eks. Linderud skole" />
+                <span class="field__label">Navn (eller kallenavn)</span>
+                <span class="field__hint">Dette vises på kartet ditt. Du trenger ikke fullt navn.</span>
+                <input name="navn" autocomplete="nickname" required placeholder="F.eks. Oskar" />
               </label>
               <label class="field">
-                <span class="field__label">Telefonnummer</span>
-                <input
-                  name="tlf"
-                  inputmode="tel"
-                  autocomplete="tel"
-                  required
-                  placeholder="F.eks. 99 99 99 99"
-                />
+                <span class="field__label">Telefon <span class="muted">(valgfritt)</span></span>
+                <span class="field__hint">Bare hvis dere vil være med på premie/kontakt i et ekte arrangement.</span>
+                <input name="tlf" inputmode="tel" autocomplete="tel" placeholder="Kan stå tom" />
               </label>
               <label class="field">
-                <span class="field__label">E-post</span>
-                <input name="epost" type="email" autocomplete="email" required placeholder="navn@epost.no" />
+                <span class="field__label">E-post <span class="muted">(valgfritt)</span></span>
+                <span class="field__hint">Brukes vanligvis av voksne til innlogging for online toppliste.</span>
+                <input name="epost" type="email" autocomplete="email" placeholder="Kan stå tom" />
               </label>
             </div>
 
             <label class="checkbox">
               <input id="consent" type="checkbox" required />
               <span>
-                Jeg godtar at nettstedet bruker GPS mens jeg spiller (for å telle poeng ved gåing/sykling).
+                Jeg forstår at appen bruker <strong>posisjon</strong> mens jeg spiller for å telle gåing/sykling. Jeg kan
+                slå det av når som helst.
               </span>
             </label>
 
@@ -105,6 +148,7 @@
           <div class="play__map">
             <div id="map" class="map" aria-label="Kart"></div>
             <canvas id="weather-fx" class="weather-fx" aria-hidden="true"></canvas>
+            <div id="trophy-toast" class="toast" aria-live="polite" aria-atomic="true" hidden></div>
           </div>
 
           <aside class="play__panel" aria-label="Poeng og kontrollpanel">
@@ -124,45 +168,75 @@
                 </div>
               </div>
 
+              <div class="panel__hint muted" id="ready-status">Status: —</div>
+
+              <div class="play-hub" id="play-hub" aria-label="Din dag">
+                <div class="play-hub__title">Din dag</div>
+                <div class="play-hub__line1" id="play-hub-line1">—</div>
+                <div class="play-hub__line2 muted" id="play-hub-line2">—</div>
+              </div>
+
               <div class="stats">
                 <div class="stat">
                   <div class="stat__label">Poeng i dag</div>
                   <div class="stat__value" id="points-today">0</div>
                 </div>
                 <div class="stat">
-                  <div class="stat__label">Distanse (aktiv)</div>
+                  <div class="stat__label">Gått i dag</div>
                   <div class="stat__value" id="distance-active">0.00 km</div>
                 </div>
                 <div class="stat">
-                  <div class="stat__label">Aktivitet</div>
+                  <div class="stat__label">Dette gjør du nå</div>
                   <div class="stat__value" id="activity-type">—</div>
                 </div>
               </div>
 
               <div class="stats stats--2">
                 <div class="stat">
-                  <div class="stat__label">Bevegelse (sensor)</div>
+                  <div class="stat__label">Bevegelse</div>
                   <div class="stat__value" id="motion-status">—</div>
                 </div>
                 <div class="stat">
-                  <div class="stat__label">CO₂ spart (i dag)</div>
+                  <div class="stat__label">Miljø (i dag)</div>
                   <div class="stat__value" id="co2-today">0.0 kg</div>
                 </div>
               </div>
 
               <div class="stats stats--2" style="margin-top:10px">
                 <div class="stat">
-                  <div class="stat__label">Ukesoppdrag</div>
+                  <div class="stat__label">Uke-mål</div>
                   <div class="stat__value" id="weekly-challenge">—</div>
                 </div>
                 <div class="stat">
-                  <div class="stat__label">Badges</div>
-                  <div class="stat__value" id="badge-count">0</div>
+                  <div class="stat__label">Nivå</div>
+                  <div class="stat__value" id="level-text">1</div>
+                </div>
+              </div>
+
+              <div class="card card--soft" style="margin-top:10px">
+                <div class="row row--space">
+                  <div>
+                    <div class="strong">Dagens premie</div>
+                    <div class="muted" id="daily-reward-sub">—</div>
+                  </div>
+                  <button class="btn btn--primary" id="btn-claim-reward" type="button">Åpne</button>
+                </div>
+                <div class="notice" id="daily-reward-note" role="status" aria-live="polite" style="margin-top:10px"></div>
+              </div>
+
+              <div class="stat" style="margin-top:10px">
+                <div class="stat__label">Dagens mål</div>
+                <div class="row row--space" style="margin-top:6px">
+                  <div class="strong" id="daily-goal-text">—</div>
+                  <div class="muted" id="daily-goal-sub"></div>
+                </div>
+                <div class="goalbar" aria-hidden="true">
+                  <div class="goalbar__fill" id="daily-goal-fill" style="width:0%"></div>
                 </div>
               </div>
 
               <div class="actions">
-                <button class="btn btn--primary" id="btn-start">Start dagens tur</button>
+                <button class="btn btn--primary" id="btn-start">Start tur</button>
                 <button class="btn btn--primary" id="btn-arrived" disabled>Jeg er fremme</button>
                 <button class="btn" id="btn-stop" disabled>Stopp</button>
                 <button class="btn btn--ghost" id="btn-center">Sentrer</button>
@@ -189,7 +263,7 @@
               <details class="details">
                 <summary>3D-kart (nøkkel)</summary>
                 <p class="muted" style="margin-top:10px">
-                  For å få satellitt + 3D-bygg trenger du en gratis MapTiler-nøkkel.
+                  For å få stilisert 3D-kart (vektor, terreng, bygg) uten satellitt-rutenett trenger du en gratis MapTiler-nøkkel.
                 </p>
                 <div class="actions" style="margin-top:10px">
                   <input id="maptiler-key" placeholder="Lim inn MapTiler key…" />
@@ -220,54 +294,89 @@
                 </ul>
               </details>
 
-              <div class="panel__hint muted">Tips: På mobil må du gi posisjon/sensor-tilgang.</div>
+              <div class="panel__hint muted">
+                Under aktiv tur prøver appen å holde skjermen våken (så GPS/poeng ikke stopper når skjermen dimmes).
+                Hvis telefonen er <strong>helt avslått</strong>, kan ingen app telle — da må den være på. Bytter du app
+                eller lukker fanen, kan nettleseren pause turen.
+              </div>
             </div>
           </aside>
         </div>
       </section>
 
-      <section id="view-school" class="view" hidden>
+      <section id="view-tasks" class="view" hidden>
         <div class="card">
           <div class="row row--space">
             <div>
-              <h2>Skole</h2>
+              <h2>Oppgaver</h2>
+              <p class="muted">Små mål hver dag og hver uke — fullfør 3 ukesoppgaver for 2× boost!</p>
+            </div>
+            <div class="pill" id="tasks-pill">—</div>
+          </div>
+
+          <div class="grid-2" style="margin-top:14px">
+            <div class="card card--soft">
+              <h3>Daglige</h3>
+              <div id="tasks-daily" class="checklist"></div>
+            </div>
+            <div class="card card--soft">
+              <h3>Ukentlige</h3>
+              <div id="tasks-weekly" class="checklist"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-leaderboard" class="view" hidden>
+        <div class="card">
+          <div class="row row--space">
+            <div>
+              <h2>Toppliste</h2>
               <p class="muted">
-                Hver 3. måned kåres en vinner på skolen. I denne web-demoen er dette lokalt – i ekte versjon må dette være
-                en delt server-løsning.
+                Se hvem som leder hos deg — eller i hele landet. Husk å <strong>sende inn poeng</strong> hvis dere
+                bruker online toppliste (voksne kan hjelpe i Profil).
               </p>
             </div>
             <div class="pill" id="season-pill">Sesong</div>
           </div>
 
+          <div class="lb-tabs" role="tablist" aria-label="Område for toppliste">
+            <button type="button" class="lb-tabs__btn is-active" id="lb-tab-kommune" data-lb-scope="kommune">
+              Min kommune
+            </button>
+            <button type="button" class="lb-tabs__btn" id="lb-tab-all" data-lb-scope="all">Hele landet</button>
+          </div>
+
           <div class="stats" style="margin-top:14px">
             <div class="stat">
-              <div class="stat__label">Distanse i sesongen</div>
+              <div class="stat__label">Gått (denne perioden)</div>
               <div class="stat__value" id="season-distance">0.00 km</div>
             </div>
             <div class="stat">
-              <div class="stat__label">Poeng i sesongen</div>
+              <div class="stat__label">Poeng (denne perioden)</div>
               <div class="stat__value" id="season-points">0</div>
             </div>
             <div class="stat">
-              <div class="stat__label">Sesong-periode</div>
+              <div class="stat__label">Periode</div>
               <div class="stat__value" id="season-range">—</div>
             </div>
           </div>
 
           <div class="grid-2">
             <div class="card card--soft">
-              <h3>Vinner (denne sesongen)</h3>
+              <h3 id="winner-heading">Leder i kommunen</h3>
               <div class="notice is-good" id="winner-box" role="status" aria-live="polite"></div>
               <div class="actions">
-                <button class="btn" id="btn-publish-score">Publiser poeng til “skole”</button>
+                <button class="btn" id="btn-publish-score">Publiser poeng til topplista</button>
                 <button class="btn btn--ghost" id="btn-tv">TV-modus (fullskjerm)</button>
               </div>
             </div>
             <div class="card card--soft">
-              <h3>Toppliste (demo)</h3>
+              <h3 id="leaderboard-panel-title">Rangering</h3>
+              <div class="notice" id="lb-my-rank" role="status" aria-live="polite" style="margin-bottom:10px"></div>
               <div id="leaderboard" class="leaderboard"></div>
               <div class="muted" style="margin-top:10px">
-                Proff versjon: innlogging + anti-juks på server + visning på storskjerm på skolen.
+                Tips: Voksne kan koble på online toppliste i Profil (valgfritt).
               </div>
             </div>
           </div>
@@ -279,51 +388,64 @@
           <div class="row row--space">
             <div>
               <h2>Profil</h2>
-              <p class="muted">Se og endre registreringen din.</p>
+              <p class="muted">
+                Her styrer du det som lagres lokalt. Telefon/e-post er valgfritt — bruk det gjerne sammen med en voksen.
+              </p>
             </div>
             <button class="btn btn--danger" id="btn-reset">Nullstill</button>
           </div>
 
-          <div class="card card--soft" style="margin-top:14px">
-            <h3>Innlogging (for toppliste)</h3>
-            <p class="muted">Logg inn med e-post så poengene dine kan vises i skolens toppliste.</p>
-            <div class="grid" style="margin-top:10px">
-              <label class="field">
-                <span class="field__label">E-post</span>
-                <input id="auth-email" type="email" placeholder="navn@epost.no" />
-              </label>
-              <label class="field">
-                <span class="field__label">Navn i toppliste</span>
-                <input id="auth-name" placeholder="F.eks. Oskar" />
-              </label>
+          <details class="details" style="margin-top:14px">
+            <summary>For voksne (online toppliste)</summary>
+            <div class="card card--soft" style="margin-top:10px">
+              <h3>Innlogging (for toppliste)</h3>
+              <p class="muted">Valgfritt. Brukes hvis dere vil at alle skal se samme toppliste.</p>
+              <div class="grid" style="margin-top:10px">
+                <label class="field">
+                  <span class="field__label">E-post</span>
+                  <input id="auth-email" type="email" placeholder="navn@epost.no" />
+                </label>
+                <label class="field">
+                  <span class="field__label">Navn i toppliste</span>
+                  <input id="auth-name" placeholder="F.eks. Oskar" />
+                </label>
+              </div>
+              <div class="actions" style="margin-top:10px">
+                <button class="btn btn--primary" id="btn-auth-login" type="button">Send innloggingslink</button>
+                <button class="btn btn--ghost" id="btn-auth-logout" type="button">Logg ut</button>
+              </div>
+              <div class="panel__hint muted" id="auth-status">Ikke innlogget</div>
             </div>
-            <div class="actions" style="margin-top:10px">
-              <button class="btn btn--primary" id="btn-auth-login" type="button">Send innloggingslink</button>
-              <button class="btn btn--ghost" id="btn-auth-logout" type="button">Logg ut</button>
+
+            <div class="card card--soft" style="margin-top:10px">
+              <h3>Koble til database (Supabase)</h3>
+              <p class="muted">Valgfritt. Hvis dette ikke fylles inn, fungerer appen fortsatt lokalt på enheten.</p>
+              <div class="grid" style="margin-top:10px">
+                <label class="field">
+                  <span class="field__label">Supabase URL</span>
+                  <input id="sb-url" placeholder="https://xxxxx.supabase.co" />
+                </label>
+                <label class="field">
+                  <span class="field__label">Supabase anon key</span>
+                  <input id="sb-anon" placeholder="eyJhbGciOi..." />
+                </label>
+              </div>
+              <div class="actions" style="margin-top:10px">
+                <button class="btn btn--primary" id="btn-sb-save" type="button">Lagre</button>
+                <button class="btn btn--ghost" id="btn-sb-clear" type="button">Fjern</button>
+              </div>
+              <div class="panel__hint muted" id="sb-status">Ikke konfigurert</div>
             </div>
-            <div class="panel__hint muted" id="auth-status">Ikke innlogget</div>
-          </div>
+          </details>
 
           <div class="card card--soft" style="margin-top:14px">
-            <h3>Online konkurranse (Supabase)</h3>
-            <p class="muted">
-              For ekte toppliste og vinner per skole må dere koble på en database. Lim inn Supabase URL + anon key.
-            </p>
-            <div class="grid" style="margin-top:10px">
-              <label class="field">
-                <span class="field__label">Supabase URL</span>
-                <input id="sb-url" placeholder="https://xxxxx.supabase.co" />
-              </label>
-              <label class="field">
-                <span class="field__label">Supabase anon key</span>
-                <input id="sb-anon" placeholder="eyJhbGciOi..." />
-              </label>
+            <div class="row row--space">
+              <h3 style="margin:0">Troféer (denne uka)</h3>
+              <button class="btn btn--ghost btn--sm" id="btn-share-trophies" type="button">Del</button>
             </div>
-            <div class="actions" style="margin-top:10px">
-              <button class="btn btn--primary" id="btn-sb-save" type="button">Lagre</button>
-              <button class="btn btn--ghost" id="btn-sb-clear" type="button">Fjern</button>
-            </div>
-            <div class="panel__hint muted" id="sb-status">Ikke konfigurert</div>
+            <div class="muted" style="margin-top:8px" id="trophies-week-sub">—</div>
+            <div id="trophies-week" class="trophies" style="margin-top:10px"></div>
+            <div class="notice" id="share-note" role="status" aria-live="polite" style="margin-top:10px"></div>
           </div>
 
           <form id="profile-form" class="form">
@@ -333,16 +455,16 @@
                 <input name="kommune" required />
               </label>
               <label class="field">
-                <span class="field__label">Skole</span>
-                <input name="skole" required />
+                <span class="field__label">Navn</span>
+                <input name="navn" required />
               </label>
               <label class="field">
-                <span class="field__label">Telefonnummer</span>
-                <input name="tlf" required />
+                <span class="field__label">Telefon <span class="muted">(valgfritt)</span></span>
+                <input name="tlf" placeholder="Valgfritt" />
               </label>
               <label class="field">
-                <span class="field__label">E-post</span>
-                <input name="epost" type="email" required />
+                <span class="field__label">E-post <span class="muted">(valgfritt)</span></span>
+                <input name="epost" type="email" placeholder="Valgfritt" />
               </label>
             </div>
 
@@ -369,9 +491,9 @@
             </div>
 
             <div class="card card--soft">
-              <h3>Demo “kommunekonkurranse”</h3>
+              <h3>Demo-knapp</h3>
               <p class="muted">
-                I en ekte løsning sendes poeng til en server og rangeres per kommune/skole. Her er det bare en lokal demo.
+                Dette er bare for testing i demoen.
               </p>
               <button class="btn" id="btn-fake-win">Simuler “du vant i kommunen”</button>
               <div class="notice" id="win-notice" role="status" aria-live="polite"></div>
@@ -385,15 +507,23 @@
           <h2>Om Gå Appen</h2>
           <p>
             Målet er å få flere til å <strong>gå eller sykle til skolen</strong> i stedet for å bli kjørt. Du aktiverer
-            “dagens tur” og får poeng når du beveger deg i et tempo som tilsvarer gåing eller sykling.
+            en tur og får poeng når du beveger deg som ved gåing eller sykling.
           </p>
-          <div class="card card--soft">
-            <h3>Hva som kommer i neste steg (hvis du vil)</h3>
+          <div class="trust-card">
+            <div class="trust-card__title"><span aria-hidden="true">🛡️</span> Trygg bruk</div>
             <ul>
-              <li>Innlogging og ekte konkurranse per kommune/skole</li>
-              <li>Bedre aktivitetsdeteksjon (sensorer + maskinlæring)</li>
-              <li>Belønninger, badges og daglige oppdrag</li>
-              <li>Personvern: dataminimering og foreldresamtykke for elever</li>
+              <li>Standard: data lagres <strong>lokalt på enheten</strong> (poeng, distanse, innstillinger).</li>
+              <li>Appen er ikke en chat — du får ikke meldinger fra ukjente.</li>
+              <li>Online toppliste er <strong>valgfritt</strong> og krever ofte at en voksen setter det opp.</li>
+              <li>Be om hjelp av en voksen hvis noe føles rart — og bruk <strong>Nullstill</strong> i Profil hvis du vil starte på nytt.</li>
+            </ul>
+          </div>
+          <div class="card card--soft">
+            <h3>Mer vi kan bygge senere</h3>
+            <ul>
+              <li>Enda bedre aktivitetsdeteksjon</li>
+              <li>Offisiell personvernerklæring for skole/kommune</li>
+              <li>Enkle premier som er avtalt lokalt</li>
             </ul>
           </div>
         </div>
@@ -402,7 +532,7 @@
 
     <footer class="footer">
       <div class="container footer__inner">
-        <span class="muted">Gå Appen (web demo) • laget i Cursor</span>
+        <span class="muted">Gå Appen • trygg start lokalt på enheten • online er valgfritt</span>
       </div>
     </footer>
 

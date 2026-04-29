@@ -128,6 +128,49 @@ function pixelColor(x, y, size) {
     b = 255;
   }
 
+  // Walking person silhouette (very simple) inside the pin hole.
+  // Draw as dark ink inside the blue center so it reads at small sizes.
+  if (insideCircle(x, y, pcx, pcy, pr * 0.42)) {
+    const INK = [11, 16, 32];
+    // Head
+    if (insideCircle(x, y, pcx, pcy - pr * 0.12, pr * 0.12)) {
+      r = INK[0];
+      g = INK[1];
+      b = INK[2];
+    }
+    // Torso
+    const tx = (x - pcx) / pr;
+    const ty = (y - (pcy + pr * 0.03)) / pr;
+    if (Math.abs(tx) < 0.08 && ty > -0.05 && ty < 0.22) {
+      r = INK[0];
+      g = INK[1];
+      b = INK[2];
+    }
+    // Legs (two diagonals)
+    const lx1 = x - (pcx - pr * 0.06);
+    const ly1 = y - (pcy + pr * 0.16);
+    if (Math.abs(lx1 - ly1 * 0.6) < pr * 0.05 && ly1 > 0 && ly1 < pr * 0.35) {
+      r = INK[0];
+      g = INK[1];
+      b = INK[2];
+    }
+    const lx2 = x - (pcx + pr * 0.03);
+    const ly2 = y - (pcy + pr * 0.16);
+    if (Math.abs(lx2 + ly2 * 0.4) < pr * 0.05 && ly2 > 0 && ly2 < pr * 0.35) {
+      r = INK[0];
+      g = INK[1];
+      b = INK[2];
+    }
+    // Arm
+    const ax = x - (pcx + pr * 0.04);
+    const ay = y - (pcy + pr * 0.05);
+    if (Math.abs(ax + ay * 0.7) < pr * 0.05 && ay > -pr * 0.12 && ay < pr * 0.18) {
+      r = INK[0];
+      g = INK[1];
+      b = INK[2];
+    }
+  }
+
   return [r, g, b, 255];
 }
 

@@ -14,9 +14,9 @@
   <path d="M70 120 C 182 60, 326 58, 444 136" fill="none" stroke="url(#shine)" stroke-width="34" />
 
   <!-- Keep all important geometry inside maskable safe area -->
-  <circle cx="256" cy="266" r="126" fill="#0f1d3a" fill-opacity=".24" />
+  <circle cx="256" cy="270" r="126" fill="#0f1d3a" fill-opacity=".22" />
   <path
-    d="M136 344 C 182 314, 220 284, 256 242 C 292 204, 336 178, 382 164"
+    d="M136 350 C 184 318, 222 288, 256 246 C 292 206, 336 180, 382 166"
     fill="none"
     stroke="#ffffff"
     stroke-opacity=".9"
@@ -33,5 +33,13 @@
     fill="#ffffff"
   />
   <circle cx="256" cy="230" r="34" fill="#5875ff" />
+
+  <!-- Walking person (safe zone silhouette) -->
+  <g fill="#ffffff">
+    <circle cx="256" cy="222" r="11" />
+    <path d="M246 238 C 244 256, 252 268, 262 276 C 270 284, 268 296, 258 298 C 242 302, 230 288, 232 266 C 234 252, 238 244, 246 238 Z" />
+    <path d="M236 262 L216 288 C 210 296, 214 306, 224 308 C 230 310, 236 306, 240 300 L256 278 Z" />
+    <path d="M262 276 L290 300 C 298 306, 310 304, 314 294 C 316 288, 314 282, 308 278 L270 252 Z" />
+  </g>
 </svg>
 

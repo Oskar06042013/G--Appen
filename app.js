@@ -2,6 +2,20 @@
 
 const STORAGE_KEY = "gaAppen_v1";
 const MAPTILER_STORAGE_KEY = "gaAppen_maptiler_key";
+/** Vector 3D base: minimal “game map” look — fewer raster overlays than streets, smoother zoom. */
+const MAPTILER_3D_STYLE_ID = "basic-v2";
+
+function primaryVectorSourceIdFromStyle(style) {
+  try {
+    const sources = style?.sources || {};
+    for (const [id, src] of Object.entries(sources)) {
+      if (src && src.type === "vector") return id;
+    }
+  } catch {
+    // ignore
+  }
+  return "openmaptiles";
+}
 const SUPABASE_STORAGE_KEY = "gaAppen_supabase_v1"; // { url, anon }
 const DISPLAY_NAME_STORAGE_KEY = "gaAppen_display_name_v1";
 
@@ -83,6 +97,7 @@ async function ensureProfileInSupabase(displayNameOverride) {
   const displayName =
     (displayNameOverride && String(displayNameOverride).trim()) ||
     loadDisplayName() ||
+    (state.profile.navn ? String(state.profile.navn).trim() : "") ||
     (state.profile.epost ? String(state.profile.epost).split("@")[0] : "spiller");
 
   const row = {
@@ -90,7 +105,8 @@ async function ensureProfileInSupabase(displayNameOverride) {
     display_name: displayName,
     email: user.email ?? null,
     kommune: state.profile.kommune,
-    skole: state.profile.skole,
+    // Supabase schema uses column `skole`; we map it from `lag` in UI.
+    skole: state.profile.navn ?? state.profile.lag ?? state.profile.skole ?? "",
   };
 
   await client.from("profiles").upsert(row, { onConflict: "id" });
@@ -106,6 +122,144 @@ function nowIsoDate() {
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
+}
+
+function formatActivityForUi(a) {
+  switch (a) {
+    case "går":
+      return "Går 🚶";
+    case "sykler":
+      return "Sykler 🚴";
+    case "stille":
+      return "Står stille";
+    case "kjøretøy":
+      return "Kjører / kollektiv";
+    case "ukjent":
+      return "Sjekker…";
+    default:
+      return a && a !== "—" ? String(a) : "—";
+  }
+}
+
+function updatePlayHub() {
+  const l1 = $("#play-hub-line1");
+  const l2 = $("#play-hub-line2");
+  if (!l1 || !l2) return;
+
+  const streak = Number(state.totals?.streak ?? 0);
+  const dateKey = nowIsoDate();
+  const d = getDaily(state, dateKey);
+  const goal = dailyGoalMeters();
+  const m = Number(d.activeMeters ?? 0);
+  const left = Math.max(0, goal - m);
+
+  const bits = [];
+  if (streak > 0) bits.push(`🔥 ${streak} dager på rad`);
+  if (isWeeklyBoostActive()) bits.push("⚡ 2× boost (poeng + XP)");
+  l1.textContent = bits.length ? bits.join(" • ") : "Klar for en liten tur?";
+
+  if (m < goal) {
+    l2.textContent = `${left.toFixed(0)} m igjen til dagens mål — ta det i ditt tempo.`;
+  } else {
+    l2.textContent = "Dagens mål er i boks! Sjekk Oppgaver for ekstra moro.";
+  }
+}
+
+function xpNeededForLevel(lvl) {
+  // Simple curve: quick early levels, slower later. Tuned for kids: frequent small wins.
+  const L = Math.max(1, Number(lvl) || 1);
+  return Math.round(180 + 70 * (L - 1) + 18 * (L - 1) * (L - 1));
+}
+
+function awardXp(amount, reason) {
+  const g = ensureGamification(state);
+  const level = (g.level ||= { xp: 0, lvl: 1 });
+  const mult = isWeeklyBoostActive() ? 2 : 1;
+  const add = Math.max(0, Math.round((Number(amount) || 0) * mult));
+  if (!add) return;
+  level.xp = Math.max(0, Math.round(Number(level.xp) || 0) + add);
+  level.lvl = Math.max(1, Math.round(Number(level.lvl) || 1));
+  let leveled = false;
+  while (level.xp >= xpNeededForLevel(level.lvl)) {
+    level.xp -= xpNeededForLevel(level.lvl);
+    level.lvl += 1;
+    leveled = true;
+  }
+  if (leveled) {
+    showTrophyToast({ title: `Nivå ${level.lvl}!`, level: "gold", sub: reason ? String(reason) : "Du gikk/syklet deg opp!" });
+  }
+}
+
+function isWeeklyBoostActive() {
+  const g = ensureGamification(state);
+  const wk = weekKeyNow();
+  return !!g.weeklyBoost?.[wk];
+}
+
+function maybeActivateWeeklyBoostFromTasks() {
+  const g = ensureGamification(state);
+  const wk = weekKeyNow();
+  if (g.weeklyBoost?.[wk]) return false;
+
+  const { weekly } = getTaskDefs();
+  const doneCount = (weekly ?? []).filter((t) => !!t.done).length;
+  if (doneCount < 3) return false;
+
+  g.weeklyBoost[wk] = { activatedAt: Date.now() };
+  saveState(state);
+  showTrophyToast({ title: "Boost aktiv!", level: "gold", sub: "Du fullførte 3 ukesoppgaver: 2× poeng og 2× XP!" });
+  return true;
+}
+
+function canClaimDailyRewardToday() {
+  const g = ensureGamification(state);
+  const r = (g.rewards ||= { lastClaimDate: null, streak: 0, cosmetics: [] });
+  const today = nowIsoDate();
+  return r.lastClaimDate !== today;
+}
+
+function claimDailyReward() {
+  const g = ensureGamification(state);
+  const r = (g.rewards ||= { lastClaimDate: null, streak: 0, cosmetics: [] });
+  const today = nowIsoDate();
+  if (r.lastClaimDate === today) return { ok: false, text: "Du har allerede åpnet dagens premie. Kom tilbake i morgen!" };
+
+  // Update streak: if claimed yesterday, +1 else reset.
+  const yesterday = addDaysIso(today, -1);
+  r.streak = r.lastClaimDate === yesterday ? (Number(r.streak || 0) + 1) : 1;
+  r.lastClaimDate = today;
+
+  // Reward: a bit of XP + sometimes a cosmetic sticker.
+  const baseXp = 55 + Math.min(45, Math.round((r.streak - 1) * 6));
+  awardXp(baseXp, "Daglig premie");
+
+  const cosmetics = [
+    { id: "sparkle", name: "✨ Glimt" },
+    { id: "leaf", name: "🍃 Blad" },
+    { id: "rocket", name: "🚀 Rakett" },
+    { id: "crown", name: "👑 Krone" },
+    { id: "star", name: "⭐ Stjerne" },
+    { id: "trophy", name: "🏆 Mini-trofé" },
+  ];
+  let gotCosmetic = null;
+  const roll = Math.random();
+  if (roll < 0.45) {
+    // Try to give something new first.
+    const owned = new Set((r.cosmetics ?? []).map(String));
+    const pool = cosmetics.filter((c) => !owned.has(c.id));
+    const pickFrom = pool.length ? pool : cosmetics;
+    gotCosmetic = pickFrom[Math.floor(Math.random() * pickFrom.length)];
+    if (!owned.has(gotCosmetic.id)) r.cosmetics.push(gotCosmetic.id);
+  }
+
+  saveState(state);
+  updateStatsUi();
+  return {
+    ok: true,
+    text: gotCosmetic
+      ? `Du fikk ${baseXp} XP + et samlemerke: ${gotCosmetic.name} (dag ${r.streak}).`
+      : `Du fikk ${baseXp} XP! (dag ${r.streak})`,
+  };
 }
 
 function haversineMeters(a, b) {
@@ -125,7 +279,19 @@ function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const s = JSON.parse(raw);
+    // Backward compat: older versions used profile.skole. New UI uses profile.lag.
+    if (s?.profile && typeof s.profile === "object") {
+      if (!s.profile.lag && s.profile.skole) s.profile.lag = s.profile.skole;
+      // New: prefer profile.navn for in-map label.
+      if (!s.profile.navn) {
+        const dn = loadDisplayName?.() || "";
+        const email = s.profile.epost ? String(s.profile.epost) : "";
+        const fromEmail = email && email.includes("@") ? email.split("@")[0] : "";
+        s.profile.navn = dn || fromEmail || s.profile.lag || "Spiller";
+      }
+    }
+    return s;
   } catch {
     return null;
   }
@@ -159,6 +325,8 @@ function defaultState() {
       badges: [], // array of { id, earnedAt, title }
       weekly: {}, // weekKey -> { challengeId, progress, target, completedAt? }
       sessions: {}, // dateKey -> { startedAt, endedAt, pointsStart, metersStart }
+      level: { xp: 0, lvl: 1 }, // lightweight progression (local/demo)
+      rewards: { lastClaimDate: null, streak: 0, cosmetics: [] }, // daily reward + collection
     },
     daily: {}, // by YYYY-MM-DD
   };
@@ -167,13 +335,573 @@ function defaultState() {
 /** Gamification må eksistere før vi bruker weekly/badges; ikke bruk `a?.b ??=` (ugyldig LHS i flere nettlesere). */
 function ensureGamification(s) {
   if (!s.gamification || typeof s.gamification !== "object") {
-    s.gamification = { badges: [], weekly: {}, sessions: {} };
+    s.gamification = {
+      badges: [],
+      weekly: {},
+      sessions: {},
+      trophies: {},
+      tasks: {},
+      level: { xp: 0, lvl: 1 },
+      rewards: { lastClaimDate: null, streak: 0, cosmetics: [] },
+      weeklyBoost: {}, // weekKey -> { activatedAt }
+    };
   } else {
     if (!s.gamification.weekly || typeof s.gamification.weekly !== "object") s.gamification.weekly = {};
     if (!Array.isArray(s.gamification.badges)) s.gamification.badges = [];
     if (!s.gamification.sessions || typeof s.gamification.sessions !== "object") s.gamification.sessions = {};
+    if (!s.gamification.trophies || typeof s.gamification.trophies !== "object") s.gamification.trophies = {};
+    if (!s.gamification.tasks || typeof s.gamification.tasks !== "object") s.gamification.tasks = {};
+    if (!s.gamification.level || typeof s.gamification.level !== "object") s.gamification.level = { xp: 0, lvl: 1 };
+    if (!s.gamification.rewards || typeof s.gamification.rewards !== "object") {
+      s.gamification.rewards = { lastClaimDate: null, streak: 0, cosmetics: [] };
+    } else {
+      if (!Array.isArray(s.gamification.rewards.cosmetics)) s.gamification.rewards.cosmetics = [];
+      if (typeof s.gamification.rewards.streak !== "number") s.gamification.rewards.streak = 0;
+      if (s.gamification.rewards.lastClaimDate != null) {
+        s.gamification.rewards.lastClaimDate = String(s.gamification.rewards.lastClaimDate);
+      }
+    }
+    if (!s.gamification.weeklyBoost || typeof s.gamification.weeklyBoost !== "object") s.gamification.weeklyBoost = {};
   }
   return s.gamification;
+}
+
+function tasksStore() {
+  const g = ensureGamification(state);
+  const t = (g.tasks ||= {});
+  t.daily ||= {};
+  t.weekly ||= {};
+  return t;
+}
+
+function countActiveDaysLast7(minMeters = 500) {
+  const today = new Date();
+  let days = 0;
+  for (let i = 0; i < 7; i++) {
+    const dt = new Date(today);
+    dt.setDate(today.getDate() - i);
+    const k = nowIsoFromDate(dt);
+    const m = Number(state.daily?.[k]?.activeMeters ?? 0);
+    if (m >= minMeters) days += 1;
+  }
+  return days;
+}
+
+function sumLastNDaysActiveMeters(n = 7) {
+  const today = new Date();
+  let meters = 0;
+  for (let i = 0; i < n; i++) {
+    const dt = new Date(today);
+    dt.setDate(today.getDate() - i);
+    const k = nowIsoFromDate(dt);
+    meters += Number(state.daily?.[k]?.activeMeters ?? 0);
+  }
+  return meters;
+}
+
+function getEntryMotivationMessage() {
+  if (!state.profile) return null;
+  const dateKey = nowIsoDate();
+  const d = getDaily(state, dateKey);
+  const todayMeters = Number(d.activeMeters ?? 0);
+  const todayPoints = Number(d.points ?? 0);
+  const streak = Number(state.totals?.streak ?? 0);
+  const activeDays = countActiveDaysLast7(500);
+  const weekMeters = sumLastNDaysActiveMeters(7);
+
+  const name = String(state.profile?.navn || "Du");
+  const km = (todayMeters / 1000).toFixed(1);
+  const weekKm = (weekMeters / 1000).toFixed(1);
+
+  if (todayMeters >= 3500 || todayPoints >= 260) {
+    return {
+      text: `${name}, du har vært kjempeflink i dag! 🔥 (${km} km) Fortsett sånn — du er på vei til å vinne.`,
+      variant: "is-good",
+    };
+  }
+  if (streak >= 4 && activeDays >= 4) {
+    return {
+      text: `${name}, rått! Du har vært aktiv flere dager på rad (streak: ${streak}). Fortsett sånn — dette gir resultater.`,
+      variant: "is-good",
+    };
+  }
+  if (activeDays >= 3) {
+    return {
+      text: `${name}, bra jobba de siste dagene! ${activeDays} aktive dager denne uka (${weekKm} km). I dag kan du ta en ny liten tur.`,
+      variant: "is-good",
+    };
+  }
+  if (todayMeters >= 800) {
+    return {
+      text: `${name}, bra start i dag! (${km} km) Vil du ta litt til og samle mer poeng?`,
+      variant: null,
+    };
+  }
+  return {
+    text: `${name}, klar for en ny tur? Trykk «Start tur» når du begynner å gå eller sykle, så teller poengene.`,
+    variant: null,
+  };
+}
+
+function maybeShowEntryMotivation() {
+  const g = ensureGamification(state);
+  const dateKey = nowIsoDate();
+  const bucket = (g.entryMotivation ||= {});
+  if (bucket.lastShownDate === dateKey) return;
+  bucket.lastShownDate = dateKey;
+  saveState(state);
+  const mot = $("#motivation");
+  if (!mot) return;
+  const msg = getEntryMotivationMessage();
+  if (!msg) return;
+  setNotice(mot, msg.text, msg.variant);
+}
+
+function getTaskDefs() {
+  const dateKey = nowIsoDate();
+  const week = weekKeyNow();
+  const d = getDaily(state, dateKey);
+  const { meters: weekMeters, points: weekPoints } = sumLast7DaysMetersPoints(state);
+  const activeDays = countActiveDaysLast7(500);
+  const streak = Number(state.totals?.streak ?? 0);
+  const startedToday = !!(ensureGamification(state).sessions?.[dateKey]?.startedAt);
+
+  return {
+    dateKey,
+    week,
+    daily: [
+      {
+        id: "start_tur",
+        title: "Start en tur",
+        meta: "Trykk «Start tur» minst én gang i dag.",
+        done: startedToday,
+      },
+      {
+        id: "walk_1km",
+        title: "Gå/sykle 1 km",
+        meta: `${(Number(d.activeMeters ?? 0) / 1000).toFixed(2)} / 1.00 km`,
+        done: Number(d.activeMeters ?? 0) >= 1000,
+      },
+      {
+        id: "earn_150",
+        title: "Få 150 poeng",
+        meta: `${Number(d.points ?? 0)} / 150 poeng`,
+        done: Number(d.points ?? 0) >= 150,
+      },
+    ],
+    weekly: [
+      {
+        id: "week_10km",
+        title: "10 km denne uka",
+        meta: `${(weekMeters / 1000).toFixed(1)} / 10.0 km`,
+        done: weekMeters >= 10_000,
+      },
+      {
+        id: "week_3days",
+        title: "Aktiv 3 dager",
+        meta: `${activeDays} / 3 dager (min. 500m per dag)`,
+        done: activeDays >= 3,
+      },
+      {
+        id: "week_streak3",
+        title: "Streak 3 dager",
+        meta: `${streak} / 3 dager`,
+        done: streak >= 3,
+      },
+    ],
+  };
+}
+
+function renderTasks() {
+  const dailyEl = $("#tasks-daily");
+  const weeklyEl = $("#tasks-weekly");
+  const pill = $("#tasks-pill");
+  if (!dailyEl || !weeklyEl) return;
+
+  const { dateKey, week, daily, weekly } = getTaskDefs();
+  if (pill) pill.textContent = `I dag: ${dateKey} • Uke: ${week}`;
+
+  const store = tasksStore();
+  const dailyBucket = (store.daily[dateKey] ||= {});
+  const weeklyBucket = (store.weekly[week] ||= {});
+
+  const renderList = (el, list, bucket) => {
+    el.innerHTML = "";
+    for (const it of list) {
+      if (it.done && !bucket[it.id]) bucket[it.id] = Date.now();
+      const done = !!bucket[it.id] || !!it.done;
+      const row = document.createElement("div");
+      row.className = `check${done ? " is-done" : ""}`;
+      row.innerHTML = `
+        <div class="check__row">
+          <div class="check__title">${escapeHtml(it.title)}</div>
+          <div class="check__badge">${done ? "Ferdig ✅" : "Pågår"}</div>
+        </div>
+        <div class="check__meta">${escapeHtml(it.meta || "")}</div>
+      `;
+      el.appendChild(row);
+    }
+  };
+
+  renderList(dailyEl, daily, dailyBucket);
+  renderList(weeklyEl, weekly, weeklyBucket);
+  saveState(state);
+
+  // Activates once per week when 3 weekly tasks are done.
+  maybeActivateWeeklyBoostFromTasks();
+}
+
+function weekKeyNow() {
+  return isoWeekKey(new Date());
+}
+
+function sumLast7DaysMetersPoints(s) {
+  const today = new Date();
+  let meters = 0;
+  let points = 0;
+  for (let i = 0; i < 7; i++) {
+    const dt = new Date(today);
+    dt.setDate(today.getDate() - i);
+    const k = nowIsoFromDate(dt);
+    meters += Number(s.daily?.[k]?.activeMeters ?? 0);
+    points += Number(s.daily?.[k]?.points ?? 0);
+  }
+  return { meters, points };
+}
+
+function trophyLevel(value, bronze, silver, gold) {
+  if (value >= gold) return "gold";
+  if (value >= silver) return "silver";
+  if (value >= bronze) return "bronze";
+  return null;
+}
+
+function pct(n) {
+  return `${Math.round(clamp(n, 0, 1) * 100)}%`;
+}
+
+let trophyToastQueue = [];
+let trophyToastShowing = false;
+let lastTrophyCheckAt = 0;
+
+function showTrophyToast(t) {
+  trophyToastQueue.push(t);
+  if (trophyToastShowing) return;
+
+  const el = document.querySelector("#trophy-toast");
+  if (!el) return;
+  trophyToastShowing = true;
+
+  const next = () => {
+    const item = trophyToastQueue.shift();
+    if (!item) {
+      trophyToastShowing = false;
+      el.hidden = true;
+      el.innerHTML = "";
+      return;
+    }
+
+    const levelClass = item.level === "gold" ? "is-gold" : item.level === "silver" ? "is-silver" : "is-bronze";
+    const levelName = item.level === "gold" ? "Gull" : item.level === "silver" ? "Sølv" : "Bronse";
+
+    el.hidden = false;
+    el.innerHTML = `
+      <div class="toast__card">
+        <div class="toast__icon ${levelClass}">🏆</div>
+        <div>
+          <div class="toast__title">${escapeHtml(levelName)}-trofé: ${escapeHtml(item.title)}</div>
+          <div class="toast__sub">${escapeHtml(item.sub || "")}</div>
+        </div>
+      </div>
+    `;
+
+    // Wait for animation to finish before showing the next
+    setTimeout(() => {
+      next();
+    }, 3300);
+  };
+
+  next();
+}
+
+function checkWeeklyTrophies() {
+  const now = Date.now();
+  if (now - lastTrophyCheckAt < 2500) return; // throttle
+  lastTrophyCheckAt = now;
+
+  if (!state.profile) return;
+  const g = ensureGamification(state);
+  const week = weekKeyNow();
+  const bucket = (g.trophies[week] ??= {}); // trophyId -> level
+
+  const { meters: weekMeters, points: weekPoints } = sumLast7DaysMetersPoints(state);
+  const streak = Number(state.totals?.streak ?? 0);
+
+  const defs = [
+    {
+      id: "week_distance",
+      title: "Uke-distanse",
+      unit: "km",
+      value: weekMeters / 1000,
+      thresholds: [5, 12, 20],
+      sub: (lvl) => `Du har gått/syklet ${(weekMeters / 1000).toFixed(1)} km denne uka.`,
+    },
+    {
+      id: "week_points",
+      title: "Uke-poeng",
+      unit: "poeng",
+      value: weekPoints,
+      thresholds: [300, 800, 1400],
+      sub: (lvl) => `Du har ${Math.round(weekPoints)} poeng denne uka.`,
+    },
+    {
+      id: "streak",
+      title: "Streak",
+      unit: "dager",
+      value: streak,
+      thresholds: [3, 7, 14],
+      sub: (lvl) => `Streak: ${streak} dager på rad.`,
+    },
+  ];
+
+  for (const d of defs) {
+    const lvl = trophyLevel(d.value, d.thresholds[0], d.thresholds[1], d.thresholds[2]);
+    if (!lvl) continue;
+    const prev = bucket[d.id];
+    const order = { bronze: 1, silver: 2, gold: 3 };
+    if (prev && order[prev] >= order[lvl]) continue;
+    bucket[d.id] = lvl;
+    saveState(state);
+    showTrophyToast({ title: d.title, level: lvl, sub: d.sub(lvl) });
+  }
+}
+
+function dailyGoalMeters() {
+  // Simple default daily goal. Can be made configurable later.
+  return 1500;
+}
+
+function updateDailyGoalUi() {
+  const text = $("#daily-goal-text");
+  const sub = $("#daily-goal-sub");
+  const fill = $("#daily-goal-fill");
+  if (!text || !sub || !fill) return;
+
+  const goal = dailyGoalMeters();
+  const dateKey = nowIsoDate();
+  const d = getDaily(state, dateKey);
+  const meters = Number(d.activeMeters ?? 0);
+  const p = goal > 0 ? meters / goal : 0;
+  fill.style.width = pct(p);
+  text.textContent = `${(meters / 1000).toFixed(2)} / ${(goal / 1000).toFixed(1)} km`;
+  sub.textContent = p >= 1 ? "Jippi — du klarte det!" : `${Math.max(0, goal - meters).toFixed(0)} m igjen (helt greit å ta pause)`;
+
+  // One-time toast per day when goal reached
+  const g = ensureGamification(state);
+  const key = `daily_goal_${dateKey}`;
+  if (p >= 1 && !g.trophies?.[key]) {
+    // reuse trophies bucket as a generic "already celebrated" store
+    g.trophies ??= {};
+    g.trophies[key] = { reachedAt: Date.now() };
+    saveState(state);
+    showTrophyToast({ title: "Dagens mål", level: "gold", sub: "Du nådde dagens mål. Walk like a boss." });
+  }
+}
+
+function updateReadyStatusUi() {
+  const el = $("#ready-status");
+  if (!el) return;
+
+  const lk = state.map?.lastKnown;
+  const ageMs = lk?.at ? Date.now() - lk.at : Infinity;
+  const gpsOk = Number.isFinite(ageMs) && ageMs < 30_000;
+  const gpsText = gpsOk ? "Finner deg ✅" : "Finner GPS…";
+
+  const sensorOk = motion.enabled;
+  const sensorText = sensorOk ? "Bevegelse ✅" : "Bevegelse: valgfri";
+
+  let pointsText = "—";
+  if (!session.active) pointsText = "Trykk «Start tur» for å telle poeng";
+  else {
+    const gate = canAwardPoints(session.lastActivity, session.lastSpeedMps ?? 0);
+    pointsText = gate.ok ? "Poengene teller nå ⭐" : `Pause: ${gate.why}`;
+  }
+
+  el.textContent = `${gpsText} • ${sensorText} • ${pointsText}`;
+}
+
+function trophyDefsForUi() {
+  const { meters: weekMeters, points: weekPoints } = sumLast7DaysMetersPoints(state);
+  const streak = Number(state.totals?.streak ?? 0);
+  return [
+    {
+      id: "week_distance",
+      title: "Uke-distanse",
+      value: weekMeters,
+      unit: "m",
+      display: `${(weekMeters / 1000).toFixed(1)} km`,
+      thresholds: { bronze: 5000, silver: 12000, gold: 20000 },
+    },
+    {
+      id: "week_points",
+      title: "Uke-poeng",
+      value: weekPoints,
+      unit: "poeng",
+      display: `${Math.round(weekPoints)} poeng`,
+      thresholds: { bronze: 300, silver: 800, gold: 1400 },
+    },
+    {
+      id: "streak",
+      title: "Streak",
+      value: streak,
+      unit: "dager",
+      display: `${streak} dager`,
+      thresholds: { bronze: 3, silver: 7, gold: 14 },
+    },
+  ];
+}
+
+function renderWeeklyTrophiesUi() {
+  const wrap = $("#trophies-week");
+  const sub = $("#trophies-week-sub");
+  if (!wrap || !sub) return;
+  const week = weekKeyNow();
+  sub.textContent = `Uke: ${week} • Resetter hver mandag`;
+
+  const defs = trophyDefsForUi();
+  const g = ensureGamification(state);
+  const bucket = (g.trophies[week] ||= {}); // trophyId -> level
+  const order = { bronze: 1, silver: 2, gold: 3 };
+
+  wrap.innerHTML = "";
+  for (const d of defs) {
+    const lvl = trophyLevel(d.value, d.thresholds.bronze, d.thresholds.silver, d.thresholds.gold);
+    const achieved = lvl ? lvl : null;
+    const medalClass = achieved ? `is-${achieved}` : "is-bronze";
+    const medalText = achieved ? (achieved === "gold" ? "G" : achieved === "silver" ? "S" : "B") : "—";
+    const nextTarget =
+      !achieved ? d.thresholds.bronze : achieved === "bronze" ? d.thresholds.silver : achieved === "silver" ? d.thresholds.gold : d.thresholds.gold;
+    const prog = nextTarget > 0 ? d.value / nextTarget : 0;
+
+    // sync latest achieved into bucket (no toast here)
+    if (achieved && (!bucket[d.id] || order[bucket[d.id]] < order[achieved])) bucket[d.id] = achieved;
+
+    const card = document.createElement("div");
+    card.className = "trophy";
+    card.innerHTML = `
+      <div class="trophy__medal ${achieved ? `is-${achieved}` : "is-silver"}">🏆</div>
+      <div>
+        <div class="trophy__title">${escapeHtml(d.title)}</div>
+        <div class="trophy__meta">${escapeHtml(d.display)} • Neste: ${
+          d.unit === "m" ? `${(nextTarget / 1000).toFixed(1)} km` : escapeHtml(String(nextTarget))
+        }</div>
+        <div class="trophy__bar"><div class="trophy__barfill" style="width:${pct(prog)}"></div></div>
+      </div>
+    `;
+    wrap.appendChild(card);
+  }
+  saveState(state);
+}
+
+async function shareTrophiesImage() {
+  const note = $("#share-note");
+  const week = weekKeyNow();
+  const defs = trophyDefsForUi();
+  const name = state.profile?.navn || "Spiller";
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 1080;
+  canvas.height = 1350;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  // Background
+  const grd = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  grd.addColorStop(0, "#6b63ff");
+  grd.addColorStop(1, "#29d8a1");
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Card
+  ctx.fillStyle = "rgba(11,16,32,0.78)";
+  roundRect(ctx, 80, 90, 920, 1170, 48);
+  ctx.fill();
+
+  // Title
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.font = "800 56px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillText("Gå Appen", 140, 190);
+  ctx.font = "700 36px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillStyle = "rgba(255,255,255,0.80)";
+  ctx.fillText(`${name} • ${week}`, 140, 245);
+
+  // Items
+  let y = 340;
+  for (const d of defs) {
+    const lvl = trophyLevel(d.value, d.thresholds.bronze, d.thresholds.silver, d.thresholds.gold);
+    const label = lvl === "gold" ? "Gull" : lvl === "silver" ? "Sølv" : lvl === "bronze" ? "Bronse" : "På vei";
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.font = "800 44px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillText(d.title, 140, y);
+    ctx.font = "700 34px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillStyle = "rgba(255,255,255,0.78)";
+    ctx.fillText(`${d.display} • ${label}`, 140, y + 52);
+
+    // progress bar
+    const nextTarget =
+      !lvl ? d.thresholds.bronze : lvl === "bronze" ? d.thresholds.silver : lvl === "silver" ? d.thresholds.gold : d.thresholds.gold;
+    const prog = nextTarget > 0 ? d.value / nextTarget : 0;
+    ctx.fillStyle = "rgba(255,255,255,0.14)";
+    roundRect(ctx, 140, y + 78, 800, 18, 999);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    roundRect(ctx, 140, y + 78, 800 * clamp(prog, 0, 1), 18, 999);
+    ctx.fill();
+
+    y += 170;
+  }
+
+  ctx.fillStyle = "rgba(255,255,255,0.70)";
+  ctx.font = "600 28px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  ctx.fillText("Walk like a boss.", 140, 1215);
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) return;
+  const file = new File([blob], "ga-appen-trofeer.png", { type: "image/png" });
+
+  // Share if possible; otherwise download
+  // @ts-ignore
+  const canShareFiles = navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }));
+  try {
+    if (canShareFiles) {
+      // @ts-ignore
+      await navigator.share({ files: [file], title: "Gå Appen", text: "Trofeer denne uka" });
+      if (note) setNotice(note, "Deling sendt.", "is-good");
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "ga-appen-trofeer.png";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      if (note) setNotice(note, "Lastet ned bilde (deling støttes ikke her).", "is-good");
+    }
+  } catch (e) {
+    if (note) setNotice(note, "Deling avbrutt.", "is-warn");
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
 }
 
 function getDaily(state, dateKey) {
@@ -319,7 +1047,7 @@ function $(sel) {
 }
 
 function setView(view) {
-  const views = ["onboarding", "play", "school", "profile", "about"];
+  const views = ["splash", "loading", "onboarding", "play", "tasks", "leaderboard", "profile", "about"];
   for (const v of views) {
     const el = $(`#view-${v}`);
     if (!el) continue;
@@ -340,18 +1068,149 @@ function setNotice(el, text, variant) {
   if (variant) el.classList.add(variant);
 }
 
+function wait(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function waitForMapReady(timeoutMs = 9000) {
+  const start = Date.now();
+
+  // If 3D, wait for idle (style loaded + a frame rendered)
+  if (mapMode === "3d") {
+    ensureMap3D();
+    if (!map3d) return false;
+    return await new Promise((resolve) => {
+      let done = false;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        try {
+          map3d.off("idle", onIdle);
+        } catch {
+          // ignore
+        }
+        resolve(ok);
+      };
+      const onIdle = () => finish(true);
+      map3d.once("idle", onIdle);
+      setTimeout(() => finish(Date.now() - start < timeoutMs), timeoutMs);
+    });
+  }
+
+  // 2D: wait for Leaflet tile layer "load" (all visible tiles loaded).
+  ensureMap();
+  if (!map || !map2dLayer) return false;
+  return await new Promise((resolve) => {
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      try {
+        map2dLayer.off("load", onLoad);
+      } catch {
+        // ignore
+      }
+      resolve(ok);
+    };
+    const onLoad = () => finish(true);
+    map2dLayer.once("load", onLoad);
+    setTimeout(() => finish(Date.now() - start < timeoutMs), timeoutMs);
+  });
+}
+
+async function enterPlayView() {
+  setView("loading");
+  // Restart the loading slogan animation every time.
+  try {
+    const s = document.querySelector("#loading-slogan");
+    if (s) {
+      s.classList.remove("is-anim");
+      // force reflow
+      void s.offsetWidth;
+      s.classList.add("is-anim");
+    }
+  } catch {
+    // ignore
+  }
+  updateHeaderSubtitle();
+  updateProfileForm();
+  updateStatsUi();
+  updateSessionUi();
+
+  // Start map + location tracking immediately while we show loading.
+  ensureMap();
+  startSnapMapTracking();
+
+  // Wait for either: map ready OR a short time, then show play anyway (never block forever).
+  await Promise.race([waitForMapReady(9000), wait(1800)]);
+
+  setView("play");
+  ensureMap();
+  try {
+    const card = document.querySelector(".play__card");
+    if (card) {
+      card.classList.remove("is-panel-enter");
+      void card.offsetWidth;
+      card.classList.add("is-panel-enter");
+      setTimeout(() => card.classList.remove("is-panel-enter"), 900);
+    }
+  } catch {
+    // ignore
+  }
+  setTimeout(() => {
+    if (mapMode === "3d") map3d && map3d.resize();
+    else map && map.invalidateSize();
+  }, 60);
+
+  updateStatsUi();
+  updateSessionUi();
+  updateLocationStatusUi();
+  // Friendly “welcome back” message based on recent activity (show once per day).
+  maybeShowEntryMotivation();
+}
+
+function refreshLocationAfterResume() {
+  if (!navigator.geolocation) return;
+  // If we've been away for a while, avoid awarding a huge jump as "walking".
+  const now = Date.now();
+  const lastTs = session.lastPos?.ts || state.map?.lastKnown?.at || 0;
+  const awayMs = lastTs ? now - lastTs : 0;
+  if (awayMs > 120_000) suppressAwardOnce = true;
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      lastGeoError = null;
+      onPosition(pos); // updates map + trail + UI immediately
+      updateLocationStatusUi();
+    },
+    (err) => {
+      noteGeoError(err);
+      updateLocationStatusUi();
+    },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 12_000 },
+  );
+}
+
 let state = loadState() ?? defaultState();
 let map = null; // Leaflet fallback
 let avatarMarker = null;
 let pathLine = null;
 let trailLine = null;
+let map2dLayer = null;
 
 let map3d = null;
 let map3dMarker = null;
+let map3dCustomBuildingsAdded = false;
 let mapMode = "3d"; // always 3d by default
 let map3dTrailSourceReady = false;
 let followMode = true; // Pokemon-Go style follow camera
 let lastBearing = -18;
+
+// Prevent accidental view switching while pinching/dragging the map on mobile.
+let navLockUntil = 0;
+function lockNav(ms = 900) {
+  navLockUntil = Math.max(navLockUntil, Date.now() + ms);
+}
 
 // Motion sensor (anti-cheat helper)
 let motion = {
@@ -369,6 +1228,10 @@ let motion = {
   stepCount: 0,
   cadenceSpm: 0,
   stepConfidence: 0, // 0..1
+  /** Sekunder med «sykelfart» men nesten ingen skritt/vibrasjon → mistenker el-spark. */
+  escooterSuspectSeconds: 0,
+  /** Sekunder med GPS-hastighet i typisk gå-sone (for lomme-modus uten tydelige enkelt-skritt). */
+  walkBandStableSeconds: 0,
 };
 
 let session = {
@@ -381,9 +1244,48 @@ let session = {
   lastUpdateAt: 0,
 };
 
+/** Holder skjermen våken under tur (best effort) — nettlesere pauser ofte GPS/sensor når skjermen sover. */
+let screenWakeLock = null;
+
+async function acquireScreenWakeLock() {
+  try {
+    if (!("wakeLock" in navigator)) return;
+    screenWakeLock = await navigator.wakeLock.request("screen");
+    screenWakeLock.addEventListener("release", () => {
+      screenWakeLock = null;
+    });
+  } catch {
+    screenWakeLock = null;
+  }
+}
+
+function releaseScreenWakeLock() {
+  try {
+    const l = screenWakeLock;
+    screenWakeLock = null;
+    l?.release?.();
+  } catch {
+    screenWakeLock = null;
+  }
+}
+
+// When app resumes after a long pause, we may get a big location jump.
+// Suppress point awarding for that first fix to avoid unrealistic “backfill”.
+let suppressAwardOnce = false;
+
 let snapWatchId = null;
 let hasCenteredInitially = false;
 let lastGeoError = null; // { code, message, at }
+
+/** Toppliste-fane: «kommune» = filtrert på profil.kommune, «all» = landstoppen. */
+let leaderboardScope = "kommune";
+
+function normalizeKommuneKey(s) {
+  return String(s ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
 
 let weather = {
   lastFetchAt: 0,
@@ -420,11 +1322,12 @@ function ensureMap() {
   map = L.map("map", { zoomControl: true });
   // Satellite-like fallback (no API key) so the screen is always a map.
   // Esri World Imagery is widely compatible in browsers.
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+  map2dLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     maxZoom: 19,
     detectRetina: true,
-    updateWhenIdle: true,
-    keepBuffer: 6,
+    updateWhenIdle: false,
+    updateWhenZooming: true,
+    keepBuffer: 8,
     attribution:
       'Tiles &copy; <a href="https://www.esri.com/" target="_blank" rel="noreferrer">Esri</a> • Data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
   }).addTo(map);
@@ -436,22 +1339,55 @@ function ensureMap() {
     className: "avatar",
     html: `
       <div style="
-        width: 38px; height: 38px; border-radius: 16px;
-        background: linear-gradient(135deg, rgba(124,92,255,.95), rgba(46,229,157,.85));
-        border: 2px solid rgba(255,255,255,.65);
-        box-shadow: 0 16px 45px rgba(0,0,0,.38);
-        display: grid; place-items: center;
-        color: #071126; font-weight: 900;
-      ">GÅ</div>
+        display: grid;
+        place-items: center;
+        gap: 6px;
+        transform: translateY(-6px);
+      ">
+        <div style="
+          width: 38px; height: 38px; border-radius: 16px;
+          background: linear-gradient(135deg, rgba(124,92,255,.95), rgba(46,229,157,.85));
+          border: 2px solid rgba(255,255,255,.65);
+          box-shadow: 0 16px 45px rgba(0,0,0,.38);
+          display: grid; place-items: center;
+          color: #071126; font-weight: 900;
+        ">•</div>
+        <div style="
+          max-width: 120px;
+          padding: 4px 8px;
+          border-radius: 999px;
+          background: rgba(11,16,32,.62);
+          border: 1px solid rgba(255,255,255,.16);
+          color: rgba(255,255,255,.92);
+          font-size: 12px;
+          font-weight: 800;
+          line-height: 1;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          box-shadow: 0 14px 45px rgba(0,0,0,.35);
+          backdrop-filter: blur(10px);
+        ">${escapeHtml(state.profile?.navn || "Spiller")}</div>
+      </div>
     `,
-    iconSize: [38, 38],
-    iconAnchor: [19, 19],
+    iconSize: [150, 74],
+    iconAnchor: [75, 62],
   });
 
   avatarMarker = L.marker([start.lat, start.lng], { icon: avatarIcon }).addTo(map);
   pathLine = L.polyline([], { color: "#7c5cff", weight: 4, opacity: 0.7 }).addTo(map);
   trailLine = L.polyline([], { color: "#2ee59d", weight: 5, opacity: 0.65 }).addTo(map);
   renderTrailOn2D();
+
+  // UX: if the user drags/zooms the map, disable follow so it doesn't fight them.
+  map.on("dragstart zoomstart", () => {
+    lockNav(1100);
+    if (!followMode) return;
+    followMode = false;
+    const b = document.querySelector("#btn-follow");
+    if (b) b.textContent = "Følg: Av";
+    setNotice($("#motivation"), "Følg er av (du drar kartet). Trykk «Følg: På» for å følge deg igjen.", null);
+  });
 }
 
 function ensureMap3D() {
@@ -481,6 +1417,7 @@ function ensureMap3D() {
     }
     map3d = null;
     map3dMarker = null;
+    map3dCustomBuildingsAdded = false;
     map3dTrailSourceReady = false;
     mapMode = "2d";
     $("#map")?.classList.remove("is-3d");
@@ -498,16 +1435,18 @@ function ensureMap3D() {
 
   let rateLimitHits = 0;
 
+  map3dCustomBuildingsAdded = false;
   map3d = new maplibregl.Map({
     container: "map",
-    // Satellite + labels, similar to “Google Earth”-look
-    style: `https://api.maptiler.com/maps/hybrid/style.json?key=${key}`,
+    // Vector + 3D buildings + terrain: continuous look when zooming (no satellite photo tiles).
+    style: `https://api.maptiler.com/maps/${MAPTILER_3D_STYLE_ID}/style.json?key=${key}`,
     center: [10.7522, 59.9139],
     zoom: 15.5,
     pitch: 62,
     bearing: -18,
     antialias: true,
-    pixelRatio: Math.min(2, window.devicePixelRatio || 1),
+    pixelRatio: Math.min(2.5, (window.devicePixelRatio || 1) * 1.05),
+    fadeDuration: 360,
   });
   lastBearing = -18;
 
@@ -552,20 +1491,74 @@ function ensureMap3D() {
   );
 
   map3d.on("load", () => {
-    // Reduce visible "tile seams" on mobile for raster layers (satellite imagery).
-    // Re-run on style changes as well, because some style reloads can reintroduce defaults.
-    const applyRasterSeamFix = () => {
+    // Rasters (hillshade, etc.): longer crossfade + linear resampling hides tile edges while zooming.
+    const applyRasterTuning = () => {
       try {
         const style = map3d.getStyle();
         for (const layer of style.layers ?? []) {
           if (layer.type !== "raster") continue;
+          const lid = String(layer.id || "");
+          const isHill = /hill|shade|dem|relief|terrain/i.test(lid);
           try {
-            map3d.setPaintProperty(layer.id, "raster-fade-duration", 0);
+            map3d.setPaintProperty(layer.id, "raster-fade-duration", isHill ? 520 : 380);
           } catch {
             // ignore
           }
           try {
-            map3d.setPaintProperty(layer.id, "raster-resampling", "nearest");
+            map3d.setPaintProperty(layer.id, "raster-resampling", "linear");
+          } catch {
+            // ignore
+          }
+          if (isHill) {
+            try {
+              map3d.setPaintProperty(layer.id, "raster-opacity", 0.32);
+            } catch {
+              // ignore
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    const touchupBuildingPaint = () => {
+      if (!map3d) return;
+      const blockColor = [
+        "interpolate",
+        ["linear"],
+        ["coalesce", ["get", "render_height"], ["get", "height"], 0],
+        0,
+        "#5c6ea3",
+        25,
+        "#6f82b8",
+        70,
+        "#8fa0cf",
+        140,
+        "#b8c4e8",
+      ];
+      try {
+        for (const layer of map3d.getStyle().layers ?? []) {
+          if (layer.type !== "fill-extrusion") continue;
+          if (layer["source-layer"] !== "building") continue;
+          try {
+            map3d.setPaintProperty(layer.id, "fill-extrusion-color", blockColor);
+            map3d.setPaintProperty(layer.id, "fill-extrusion-opacity", 0.82);
+          } catch {
+            // ignore
+          }
+          try {
+            map3d.setPaintProperty(layer.id, "fill-extrusion-vertical-gradient", true);
+          } catch {
+            // ignore
+          }
+          try {
+            map3d.setPaintProperty(layer.id, "fill-extrusion-ambient-occlusion-intensity", 0.18);
+          } catch {
+            // ignore
+          }
+          try {
+            map3d.setPaintProperty(layer.id, "fill-extrusion-ambient-occlusion-radius", 3);
           } catch {
             // ignore
           }
@@ -574,8 +1567,64 @@ function ensureMap3D() {
         // ignore
       }
     };
-    applyRasterSeamFix();
-    map3d.on("styledata", applyRasterSeamFix);
+
+    const ensureCustomBuildingsIfMissing = () => {
+      if (!map3d || map3dCustomBuildingsAdded) return;
+      try {
+        const layers = map3d.getStyle().layers ?? [];
+        const hasBuiltin = layers.some(
+          (l) => l.type === "fill-extrusion" && l["source-layer"] === "building",
+        );
+        if (hasBuiltin) return;
+        const labelLayerId = layers.find((l) => l.type === "symbol" && l.layout?.["text-field"])?.id;
+        const vSource = primaryVectorSourceIdFromStyle(map3d.getStyle());
+        map3d.addLayer(
+          {
+            id: "ga-3d-buildings",
+            source: vSource,
+            "source-layer": "building",
+            filter: ["==", "extrude", "true"],
+            type: "fill-extrusion",
+            minzoom: 14,
+            paint: {
+              "fill-extrusion-color": [
+                "interpolate",
+                ["linear"],
+                ["coalesce", ["get", "render_height"], ["get", "height"], 0],
+                0,
+                "#5c6ea3",
+                25,
+                "#6f82b8",
+                70,
+                "#8fa0cf",
+                140,
+                "#b8c4e8",
+              ],
+              "fill-extrusion-height": ["coalesce", ["get", "render_height"], ["get", "height"], 12],
+              "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], ["get", "min_height"], 0],
+              "fill-extrusion-opacity": 0.82,
+              "fill-extrusion-vertical-gradient": true,
+            },
+          },
+          labelLayerId,
+        );
+        map3dCustomBuildingsAdded = true;
+      } catch {
+        // ignore
+      }
+    };
+
+    const tuneAll = () => {
+      applyRasterTuning();
+      touchupBuildingPaint();
+    };
+    tuneAll();
+    map3d.on("styledata", tuneAll);
+    ensureCustomBuildingsIfMissing();
+    map3d.once("idle", () => {
+      touchupBuildingPaint();
+      ensureCustomBuildingsIfMissing();
+    });
 
     // Terrain (3D ground). Works with MapTiler terrain tiles.
     try {
@@ -584,7 +1633,7 @@ function ensureMap3D() {
         url: `https://api.maptiler.com/tiles/terrain-rgb/tiles.json?key=${key}`,
         tileSize: 256,
       });
-      map3d.setTerrain({ source: "terrain", exaggeration: 1.15 });
+      map3d.setTerrain({ source: "terrain", exaggeration: 0.62 });
       map3d.addLayer({
         id: "sky",
         type: "sky",
@@ -598,37 +1647,37 @@ function ensureMap3D() {
       // ignore
     }
 
-    // Add 3D buildings if vector source is present.
-    const layers = map3d.getStyle().layers ?? [];
-    const labelLayerId = layers.find((l) => l.type === "symbol" && l.layout?.["text-field"])?.id;
-
-    // This works on MapTiler streets-v2: building source/layer names are present.
-    // If not present, it fails silently.
-    try {
-      map3d.addLayer(
-        {
-          id: "3d-buildings",
-          source: "openmaptiles",
-          "source-layer": "building",
-          filter: ["==", "extrude", "true"],
-          type: "fill-extrusion",
-          minzoom: 14,
-          paint: {
-            "fill-extrusion-color": "rgba(255,255,255,0.78)",
-            "fill-extrusion-height": ["get", "render_height"],
-            "fill-extrusion-base": ["get", "render_min_height"],
-            "fill-extrusion-opacity": 0.22,
-          },
-        },
-        labelLayerId,
-      );
-    } catch {
-      // ignore
-    }
-
-    map3dMarker = new maplibregl.Marker({ color: "#7c5cff" })
-      .setLngLat([10.7522, 59.9139])
-      .addTo(map3d);
+    // Custom 3D marker with name label (pro feel)
+    const el = document.createElement("div");
+    el.style.display = "grid";
+    el.style.placeItems = "center";
+    el.style.gap = "6px";
+    el.style.transform = "translateY(-10px)";
+    const dot = document.createElement("div");
+    dot.style.width = "18px";
+    dot.style.height = "18px";
+    dot.style.borderRadius = "999px";
+    dot.style.background = "linear-gradient(135deg, rgba(124,92,255,.95), rgba(46,229,157,.85))";
+    dot.style.border = "2px solid rgba(255,255,255,.75)";
+    dot.style.boxShadow = "0 16px 45px rgba(0,0,0,.35)";
+    const lab = document.createElement("div");
+    lab.textContent = state.profile?.navn || "Spiller";
+    lab.style.maxWidth = "140px";
+    lab.style.padding = "4px 8px";
+    lab.style.borderRadius = "999px";
+    lab.style.background = "rgba(11,16,32,.62)";
+    lab.style.border = "1px solid rgba(255,255,255,.16)";
+    lab.style.color = "rgba(255,255,255,.92)";
+    lab.style.fontSize = "12px";
+    lab.style.fontWeight = "800";
+    lab.style.whiteSpace = "nowrap";
+    lab.style.overflow = "hidden";
+    lab.style.textOverflow = "ellipsis";
+    // @ts-ignore
+    lab.style.backdropFilter = "blur(10px)";
+    el.appendChild(dot);
+    el.appendChild(lab);
+    map3dMarker = new maplibregl.Marker({ element: el, anchor: "bottom" }).setLngLat([10.7522, 59.9139]).addTo(map3d);
 
     // Trail as GeoJSON line
     try {
@@ -653,6 +1702,20 @@ function ensureMap3D() {
       map3dTrailSourceReady = false;
     }
   });
+
+  // UX: user gesture disables follow (so the camera doesn't fight the finger).
+  const stopFollow = () => {
+    lockNav(1100);
+    if (!followMode) return;
+    followMode = false;
+    const b = document.querySelector("#btn-follow");
+    if (b) b.textContent = "Følg: Av";
+    setNotice($("#motivation"), "Følg er av (du drar kartet). Trykk «Følg: På» for å følge deg igjen.", null);
+  };
+  map3d.on("dragstart", stopFollow);
+  map3d.on("zoomstart", stopFollow);
+  map3d.on("rotatestart", stopFollow);
+  map3d.on("pitchstart", stopFollow);
 }
 
 function bearingDeg(from, to) {
@@ -848,14 +1911,14 @@ function updateHeaderSubtitle() {
     subtitle.textContent = "";
     return;
   }
-  subtitle.textContent = `${state.profile.skole} • ${state.profile.kommune}`;
+  subtitle.textContent = `${state.profile.navn ?? "Spiller"} • ${state.profile.kommune}`;
 }
 
 function updateProfileForm() {
   const form = $("#profile-form");
   if (!form || !state.profile) return;
   form.kommune.value = state.profile.kommune;
-  form.skole.value = state.profile.skole;
+  if (form.navn) form.navn.value = state.profile.navn ?? "";
   form.tlf.value = state.profile.tlf;
   form.epost.value = state.profile.epost;
 }
@@ -865,7 +1928,7 @@ function updateStatsUi() {
   const d = getDaily(state, dateKey);
   $("#points-today").textContent = String(d.points ?? 0);
   $("#distance-active").textContent = formatKm(d.activeMeters ?? 0);
-  $("#activity-type").textContent = session.lastActivity ?? "—";
+  $("#activity-type").textContent = formatActivityForUi(session.lastActivity);
   $("#points-total").textContent = String(state.totals.pointsTotal ?? 0);
   $("#streak").textContent = String(state.totals.streak ?? 0);
 
@@ -908,9 +1971,41 @@ function updateStatsUi() {
     weeklyEl.textContent = weekly[week].completedAt ? `Ferdig! (${km}/${tgt} km)` : `${km}/${tgt} km`;
   }
 
-  const badges = ensureGamification(state).badges;
-  const badgeEl = $("#badge-count");
-  if (badgeEl) badgeEl.textContent = String(badges.length);
+  const g = ensureGamification(state);
+  const levelEl = $("#level-text");
+  if (levelEl) {
+    const lvl = Math.max(1, Number(g.level?.lvl ?? 1));
+    const xp = Math.max(0, Number(g.level?.xp ?? 0));
+    const need = xpNeededForLevel(lvl);
+    levelEl.textContent = `Lv ${lvl} • ${Math.min(need, xp)}/${need} XP`;
+  }
+
+  // Daily reward UI
+  const rewardSub = $("#daily-reward-sub");
+  const rewardBtn = $("#btn-claim-reward");
+  const r = g.rewards || { lastClaimDate: null, streak: 0, cosmetics: [] };
+  if (rewardSub) {
+    rewardSub.textContent = canClaimDailyRewardToday()
+      ? `Gratis nå • dag ${Number(r.streak || 0) + 1}`
+      : `Åpnet i dag • kom tilbake i morgen (streak: ${Number(r.streak || 0)})`;
+  }
+  if (rewardBtn) {
+    rewardBtn.disabled = !canClaimDailyRewardToday();
+    rewardBtn.textContent = canClaimDailyRewardToday() ? "Åpne" : "Åpnet";
+  }
+
+  // Award trophies continuously (weekly reset via weekKey).
+  checkWeeklyTrophies();
+
+  // If weekly tasks are completed while in Play view, activate boost immediately.
+  maybeActivateWeeklyBoostFromTasks();
+
+  updateDailyGoalUi();
+  updateReadyStatusUi();
+  updatePlayHub();
+  renderWeeklyTrophiesUi();
+  // If tasks view is visible, keep it fresh.
+  if (!document.querySelector("#view-tasks")?.hidden) renderTasks();
 }
 
 function updateSessionUi() {
@@ -973,10 +2068,10 @@ function motivationMessage(activity, pointsGained) {
 }
 
 function canAwardPoints(activity, speedMps) {
-  // Anti-cheat gate:
-  // - if motion sensor available, require some movement “texture”
-  // - if speed stays high and very stable, suspect vehicle/scooter and block
-  if (activity === "kjøretøy") return { ok: false, why: "Kjøretøy/kollektiv" };
+  // Anti-cheat: ingen poeng for stille, usikker GPS, bil/kollektiv, el-spark (heuristikk), eller «tur» uten kroppsbevegelse.
+  if (activity === "kjøretøy") return { ok: false, why: "Kjøretøy/kollektiv — ingen poeng" };
+  if (activity === "stille") return { ok: false, why: "Står stille — ingen poeng før du går/sykler" };
+  if (activity === "ukjent") return { ok: false, why: "GPS usikker — ingen poeng akkurat nå" };
   if (activity !== "går" && activity !== "sykler") return { ok: false, why: "Ikke aktiv nok" };
 
   if (!motion.enabled) return { ok: true, why: "Sensor ikke tilgjengelig" };
@@ -985,23 +2080,46 @@ function canAwardPoints(activity, speedMps) {
   const stepC = motion.stepConfidence ?? 0;
   const cad = motion.cadenceSpm ?? 0;
 
-  // Require "real body movement" like a watch.
-  // - For walking: require step-like cadence.
-  // - For cycling: allow smoother, but still require some motion texture.
+  // Gå: telefon i lomma gir ofte svakere «skritt»-pigger — godta GPS+gange + vibrasjon, ikke bare høy stepConfidence.
   if (activity === "går") {
-    if (stepC < 0.20 || cad < 80) return { ok: false, why: "Ingen steg registrert" };
+    const stableWalk = (motion.walkBandStableSeconds ?? 0) >= 3.2;
+    const v = motion.variance ?? 0;
+    const strongSteps = stepC >= 0.17 && cad >= 76;
+    const pocketWalk =
+      stableWalk &&
+      score >= 0.065 &&
+      v >= 0.032 &&
+      (cad >= 62 || stepC >= 0.11);
+    const pocketSwing = stableWalk && score >= 0.078 && v >= 0.042 && cad >= 52;
+    if (!strongSteps && !pocketWalk && !pocketSwing) {
+      return {
+        ok: false,
+        why: "For lite gange-registrert — tillat bevegelsessensor, eller unngå helt stiv lomme",
+      };
+    }
   } else if (activity === "sykler") {
-    if (score < 0.12 && stepC < 0.10) return { ok: false, why: "Lite kroppsbevegelse" };
+    if (score < 0.12 && stepC < 0.10) return { ok: false, why: "Lite kroppsbevegelse (sykkel)" };
   }
 
-  // Stable high speed suggests vehicle/e-scooter. Block if >4.2 m/s for a while with low motion.
-  if (typeof speedMps === "number" && speedMps > 4.2 && score < 0.16 && motion.stableHighSpeedSeconds >= 35) {
-    return { ok: false, why: "Mistenker kjøretøy/sparkesykkel" };
+  // Akkumulert mistanke om el-spark: jevn «sykkelfart» nesten uten vibrasjon/skritt.
+  if (activity === "sykler" && (motion.escooterSuspectSeconds ?? 0) >= 14) {
+    return { ok: false, why: "Mistenker el-sparkesykkel — ingen poeng" };
   }
 
-  // Extra e-scooter heuristic: medium-high speed with very low steps + low motion texture.
-  if (typeof speedMps === "number" && speedMps >= 3.0 && speedMps <= 7.0 && stepC < 0.12 && score < 0.14) {
-    return { ok: false, why: "Mistenker sparkesykkel" };
+  // Høy hastighet lenge med lav bevegelse → bil / sterk spark.
+  if (typeof speedMps === "number" && speedMps > 4.2 && score < 0.16 && motion.stableHighSpeedSeconds >= 28) {
+    return { ok: false, why: "Mistenker kjøretøy/el-spark — ingen poeng" };
+  }
+
+  // Rask sperre: typisk sparkesone (~12–28 km/t) med veldig lav kroppsaktivitet.
+  if (
+    typeof speedMps === "number" &&
+    speedMps >= 2.5 &&
+    speedMps <= 8.2 &&
+    stepC < 0.12 &&
+    score < 0.14
+  ) {
+    return { ok: false, why: "Mistenker el-sparkesykkel — ingen poeng" };
   }
 
   return { ok: true, why: "OK" };
@@ -1009,8 +2127,10 @@ function canAwardPoints(activity, speedMps) {
 
 function applyBonusMultiplier(dateKey, basePoints) {
   if (!basePoints) return 0;
-  if (hasDoubleBonus(state, dateKey)) return basePoints * 2;
-  return basePoints;
+  let out = basePoints;
+  if (hasDoubleBonus(state, dateKey)) out *= 2;
+  if (isWeeklyBoostActive()) out *= 2;
+  return out;
 }
 
 function initWeatherFx() {
@@ -1210,9 +2330,8 @@ function onPosition(pos) {
     speedMps = 0.7 * session.lastSpeedMps + 0.3 * speedMps;
   }
   session.lastSpeedMps = speedMps;
-  updateStableSpeedHeuristic(speedMps, dt);
-
   const activity = detectActivity(speedMps, accuracy);
+  updateAntiCheatHeuristics(speedMps, activity, dt);
   session.lastActivity = activity;
 
   if (mapMode === "3d") {
@@ -1230,6 +2349,18 @@ function onPosition(pos) {
   const d = getDaily(state, dateKey);
 
   if (session.active) {
+    // If app just resumed after long pause, don't award on the first fix.
+    if (suppressAwardOnce) {
+      suppressAwardOnce = false;
+      session.lastAcceptedPos = { latlng, ts };
+      saveState(state);
+      updateStatsUi();
+      updateSessionUi();
+      updateTrailUi();
+      updateLocationStatusUi();
+      return;
+    }
+
     const deltaFromAccepted = session.lastAcceptedPos
       ? haversineMeters(session.lastAcceptedPos.latlng, latlng)
       : dist;
@@ -1248,6 +2379,8 @@ function onPosition(pos) {
         d.activeMeters = (d.activeMeters ?? 0) + deltaFromAccepted;
         state.totals.pointsTotal = (state.totals.pointsTotal ?? 0) + pts;
         maybeUpdateStreak(dateKey);
+        // Progression: XP is driven by real movement/points (healthy “come back” loop).
+        awardXp(Math.round(pts * 0.9 + deltaFromAccepted / 90), activity === "går" ? "Gange" : "Sykling");
       }
       session.lastAcceptedPos = { latlng, ts };
 
@@ -1337,10 +2470,14 @@ function startSession() {
     maximumAge: 1500,
     timeout: 15_000,
   });
+
+  // Unngå at skjermen går i dvale midt i turen (da slår mange mobiler ned GPS/poeng i nettleser).
+  void acquireScreenWakeLock();
 }
 
 function stopSession() {
   session.active = false;
+  releaseScreenWakeLock();
   updateSessionUi();
   if (session.watchId != null && navigator.geolocation) {
     navigator.geolocation.clearWatch(session.watchId);
@@ -1356,7 +2493,12 @@ function stopSession() {
 function initNav() {
   for (const btn of document.querySelectorAll(".nav__btn")) {
     btn.addEventListener("click", () => {
+      if (Date.now() < navLockUntil) return;
       const view = btn.dataset.view;
+      if (view === "play") {
+        enterPlayView();
+        return;
+      }
       setView(view);
       if (view === "play") {
         ensureMap();
@@ -1366,8 +2508,11 @@ function initNav() {
           else map && map.invalidateSize();
         }, 50);
       }
-      if (view === "school") {
-        renderSchool();
+      if (view === "tasks") {
+        renderTasks();
+      }
+      if (view === "leaderboard") {
+        renderLeaderboard();
       }
       updateHeaderSubtitle();
       updateProfileForm();
@@ -1395,7 +2540,7 @@ function initOnboarding() {
     // Eksplisitt sjekk (ikke bare checkValidity): på flere mobiler blokkerer
     // nettleseren submit uten synlig feilmelding. index.html har novalidate.
     const kommune = String(form.elements.kommune?.value ?? "").trim();
-    const skole = String(form.elements.skole?.value ?? "").trim();
+    const navn = String(form.elements.navn?.value ?? "").trim();
     const tlf = String(form.elements.tlf?.value ?? "").trim();
     const epost = String(form.elements.epost?.value ?? "").trim();
     const consentEl = document.querySelector("#consent");
@@ -1403,18 +2548,14 @@ function initOnboarding() {
 
     const missing = [];
     if (!kommune) missing.push("kommune");
-    if (!skole) missing.push("skole");
-    if (!tlf) missing.push("telefonnummer");
-    if (!epost) missing.push("e-post");
-    if (!consentOk) missing.push("GPS-samtykke (huk av boksen)");
+    if (!navn) missing.push("navn eller kallenavn");
+    if (!consentOk) missing.push("huk av at du forstår posisjon");
 
     if (missing.length) {
-      showNote("Fyll ut: " + missing.join(", ") + ".");
+      showNote("Nesten klar! Fyll ut: " + missing.join(", ") + ".");
       try {
         if (!kommune) form.elements.kommune?.focus();
-        else if (!skole) form.elements.skole?.focus();
-        else if (!tlf) form.elements.tlf?.focus();
-        else if (!epost) form.elements.epost?.focus();
+        else if (!navn) form.elements.navn?.focus();
         else if (!consentOk) consentEl?.focus();
       } catch {
         // ignore focus errors (iOS)
@@ -1422,23 +2563,16 @@ function initOnboarding() {
       return;
     }
 
-    const profile = { kommune, skole, tlf, epost };
+    const profile = { kommune, navn, tlf, epost };
     state.profile = profile;
     saveState(state);
 
     updateHeaderSubtitle();
     updateProfileForm();
-    setView("play");
-    ensureMap();
-    setTimeout(() => {
-      if (mapMode === "3d") map3d && map3d.resize();
-      else map && map.invalidateSize();
-    }, 60);
-    updateStatsUi();
-    updateSessionUi();
+    enterPlayView();
 
     const mot = $("#motivation");
-    if (mot) setNotice(mot, "Velkommen! Trykk “Start dagens tur” når du går hjemmefra.", "is-good");
+    if (mot) setNotice(mot, "Velkommen! Trykk «Start tur» når du begynner å gå eller sykle.", "is-good");
     if (note) note.style.display = "none";
   };
 
@@ -1478,7 +2612,12 @@ function initProfile() {
   const authEmail = document.querySelector("#auth-email");
   const authName = document.querySelector("#auth-name");
   if (authEmail && state.profile?.epost) authEmail.value = state.profile.epost;
-  if (authName) authName.value = loadDisplayName() || (state.profile?.epost ? String(state.profile.epost).split("@")[0] : "");
+  if (authName) {
+    authName.value =
+      loadDisplayName() ||
+      (state.profile?.navn ? String(state.profile.navn) : "") ||
+      (state.profile?.epost ? String(state.profile.epost).split("@")[0] : "");
+  }
 
   document.querySelector("#btn-auth-login")?.addEventListener("click", async () => {
     const client = ensureSupabase();
@@ -1526,11 +2665,11 @@ function initProfile() {
       const fd = new FormData(form);
       const profile = {
         kommune: String(fd.get("kommune") || "").trim(),
-        skole: String(fd.get("skole") || "").trim(),
+        navn: String(fd.get("navn") || "").trim(),
         tlf: String(fd.get("tlf") || "").trim(),
         epost: String(fd.get("epost") || "").trim(),
       };
-      if (!profile.kommune || !profile.skole || !profile.tlf || !profile.epost) return;
+      if (!profile.kommune || !profile.navn) return;
       state.profile = profile;
       saveState(state);
       updateHeaderSubtitle();
@@ -1565,6 +2704,11 @@ function initProfile() {
 function initPlayControls() {
   $("#btn-start")?.addEventListener("click", startSession);
   $("#btn-stop")?.addEventListener("click", stopSession);
+  $("#btn-claim-reward")?.addEventListener("click", () => {
+    const note = $("#daily-reward-note");
+    const res = claimDailyReward();
+    if (note) setNotice(note, res.text, res.ok ? "is-good" : "is-warn");
+  });
   $("#btn-arrived")?.addEventListener("click", () => {
     const dateKey = nowIsoDate();
     const sess = state.gamification?.sessions?.[dateKey];
@@ -1694,10 +2838,9 @@ function startMotion() {
     motion.variance = (motion.variance || 0) + varAlpha * (diff * diff - (motion.variance || 0));
     motion.ema = ema;
 
-    // Score 0..1 based on variance (tuned for phone-in-pocket)
-    // 0.1 ~ still, 0.7+ ~ lots of motion
+    // Score 0..1 — mer følsomt for lomme (svakere, jevn pendling)
     const v = motion.variance || 0;
-    motion.score = clamp((v - 0.06) / 0.55, 0, 1);
+    motion.score = clamp((v - 0.042) / 0.44, 0, 1);
     motion.lastUpdatedAt = t;
 
     // Step / cadence estimation (watch-like feeling)
@@ -1707,10 +2850,9 @@ function startMotion() {
     // Smooth amplitude envelope
     motion.hpEma = (motion.hpEma || hpAbs) + 0.18 * (hpAbs - (motion.hpEma || hpAbs));
 
-    // Dynamic threshold: requires some movement amplitude
-    const thr = Math.max(0.22, (motion.hpEma || 0) * 0.85);
-    const minStepGapMs = 280; // prevents double-counting
-    const maxStepGapMs = 1400; // ignore very slow/erratic
+    const thr = Math.max(0.13, (motion.hpEma || 0) * 0.78);
+    const minStepGapMs = 260;
+    const maxStepGapMs = 1550;
 
     // Peak-ish detection: "hpAbs" crossing threshold with refractory period
     if (hpAbs > thr && t - (motion.lastStepAt || 0) > minStepGapMs) {
@@ -1728,31 +2870,128 @@ function startMotion() {
       }
     }
 
-    // Confidence: steps recently + cadence plausible
     const sinceStepMs = t - (motion.lastStepAt || 0);
-    const recent = sinceStepMs < 1500 ? 1 : sinceStepMs < 3000 ? 0.5 : 0;
-    const cadenceOk = motion.cadenceSpm >= 80 && motion.cadenceSpm <= 190 ? 1 : 0.4;
-    motion.stepConfidence = clamp((recent * 0.65 + cadenceOk * 0.35) * motion.score, 0, 1);
+    const recent = sinceStepMs < 1600 ? 1 : sinceStepMs < 3200 ? 0.55 : 0.2;
+    let cadenceOk = 0.38;
+    const spm = motion.cadenceSpm || 0;
+    if (spm >= 80 && spm <= 190) cadenceOk = 1;
+    else if (spm >= 65 && spm < 80) cadenceOk = 0.78;
+    else if (spm >= 52 && spm < 65) cadenceOk = 0.58;
+    // Ikke gang alt ned med lav score (lomme): minst ~40 % av «steg-puls» kommer gjennom
+    motion.stepConfidence = clamp((recent * 0.62 + cadenceOk * 0.38) * (0.4 + 0.6 * motion.score), 0, 1);
   };
 
   window.addEventListener("devicemotion", handler, { passive: true });
   motion.enabled = true;
 }
 
-function updateStableSpeedHeuristic(speedMps, dt) {
-  if (!motion.enabled) return;
+function updateAntiCheatHeuristics(speedMps, activity, dt) {
+  if (!motion.enabled) {
+    motion.stableHighSpeedSeconds = 0;
+    motion.escooterSuspectSeconds = 0;
+    motion.walkBandStableSeconds = 0;
+    return;
+  }
   if (typeof speedMps !== "number") return;
   const score = motion.score ?? 0;
+  const stepC = motion.stepConfidence ?? 0;
+
   if (speedMps > 4.2 && score < 0.16) motion.stableHighSpeedSeconds += dt;
   else motion.stableHighSpeedSeconds = Math.max(0, motion.stableHighSpeedSeconds - dt * 0.5);
   motion.stableHighSpeedSeconds = clamp(motion.stableHighSpeedSeconds, 0, 180);
+
+  const inScooterSpeedBand = speedMps >= 2.5 && speedMps <= 8.5;
+  const passiveRider = stepC < 0.14 && score < 0.16;
+  if (activity === "sykler" && inScooterSpeedBand && passiveRider) {
+    motion.escooterSuspectSeconds = (motion.escooterSuspectSeconds ?? 0) + dt;
+  } else {
+    motion.escooterSuspectSeconds = Math.max(0, (motion.escooterSuspectSeconds ?? 0) - dt * 1.8);
+  }
+  motion.escooterSuspectSeconds = clamp(motion.escooterSuspectSeconds ?? 0, 0, 120);
+
+  if (activity === "går" && speedMps >= 0.7 && speedMps <= 2.48) {
+    motion.walkBandStableSeconds = (motion.walkBandStableSeconds ?? 0) + dt;
+  } else {
+    motion.walkBandStableSeconds = Math.max(0, (motion.walkBandStableSeconds ?? 0) - dt * 2.2);
+  }
+  motion.walkBandStableSeconds = clamp(motion.walkBandStableSeconds ?? 0, 0, 50);
 }
 
-async function renderSchool() {
+function mapSeasonRowToLeader(r) {
+  return {
+    userId: r.user_id ?? null,
+    name: r.profiles?.display_name ?? "spiller",
+    school: r.skole ?? "",
+    kommune: r.kommune ?? "",
+    seasonKey: r.season_key,
+    points: r.points ?? 0,
+    activeMeters: r.active_meters ?? 0,
+  };
+}
+
+async function fetchMySupabaseRank(seasonKey, scope, kommune) {
+  const client = ensureSupabase();
+  if (!client) return null;
+  const { data: sess } = await client.auth.getSession();
+  const uid = sess?.session?.user?.id;
+  if (!uid) return { kind: "guest" };
+
+  const { data: mine, error } = await client
+    .from("season_scores")
+    .select("points")
+    .eq("season_key", seasonKey)
+    .eq("user_id", uid)
+    .maybeSingle();
+  if (error || !mine) return { kind: "none" };
+
+  const myPts = mine.points ?? 0;
+  let q = client
+    .from("season_scores")
+    .select("*", { count: "exact", head: true })
+    .eq("season_key", seasonKey)
+    .gt("points", myPts);
+  if (scope === "kommune" && String(kommune ?? "").trim()) {
+    q = q.ilike("kommune", String(kommune).trim());
+  }
+  const { count, error: e2 } = await q;
+  if (e2) return null;
+  const rank = (count ?? 0) + 1;
+  return { kind: "rank", rank, points: myPts };
+}
+
+async function fetchKommuneLeaderboardFromSupabase(seasonKey, kommune) {
+  const client = ensureSupabase();
+  const k = String(kommune ?? "").trim();
+  if (!client || !k) return null;
+  const { data, error } = await client
+    .from("season_scores")
+    .select("points, active_meters, season_key, skole, kommune, user_id, profiles(display_name)")
+    .eq("season_key", seasonKey)
+    .ilike("kommune", k)
+    .order("points", { ascending: false })
+    .limit(50);
+  if (error) return null;
+  return (data ?? []).map(mapSeasonRowToLeader);
+}
+
+async function fetchAllLeaderboardFromSupabase(seasonKey) {
+  const client = ensureSupabase();
+  if (!client) return null;
+  const { data, error } = await client
+    .from("season_scores")
+    .select("points, active_meters, season_key, skole, kommune, user_id, profiles(display_name)")
+    .eq("season_key", seasonKey)
+    .order("points", { ascending: false })
+    .limit(50);
+  if (error) return null;
+  return (data ?? []).map(mapSeasonRowToLeader);
+}
+
+async function renderLeaderboard() {
   const dateKey = nowIsoDate();
   const seasonKey = seasonKeyFromDate(dateKey);
   const seasonPill = $("#season-pill");
-  if (seasonPill) seasonPill.textContent = `Sesong: ${seasonKey}`;
+  if (seasonPill) seasonPill.textContent = `Periode: ${seasonKey}`;
 
   const seasonStats = calcSeasonStats(state, seasonKey);
   const seasonDistanceEl = $("#season-distance");
@@ -1764,92 +3003,162 @@ async function renderSchool() {
     seasonRangeEl.textContent = seasonStats.range ? `${seasonStats.range.startIso} → ${seasonStats.range.endIso}` : "—";
   }
 
-  const school = state.profile?.skole ?? "";
+  const userKommune = state.profile?.kommune?.trim() ?? "";
+  const myKey = normalizeKommuneKey(userKommune);
+  const scope = leaderboardScope;
   const online = ensureSupabase();
-  const onlineRows = online ? await fetchSchoolLeaderboardFromSupabase(seasonKey, school) : null;
-  const rows = onlineRows
-    ? onlineRows
-    : (state.school?.publishedScores ?? [])
-        .filter((r) => r.seasonKey === seasonKey && r.school === school)
-        .sort((a, b) => b.points - a.points)
-        .slice(0, 10);
+
+  const winnerHeading = $("#winner-heading");
+  const panelTitle = $("#leaderboard-panel-title");
+  const myRankEl = $("#lb-my-rank");
+
+  let myUid = null;
+  if (online) {
+    const c = ensureSupabase();
+    if (c) {
+      const { data } = await c.auth.getSession();
+      myUid = data?.session?.user?.id ?? null;
+    }
+  }
+
+  let rows = [];
+  if (online) {
+    if (scope === "kommune") {
+      rows = userKommune ? (await fetchKommuneLeaderboardFromSupabase(seasonKey, userKommune)) ?? [] : [];
+    } else {
+      rows = (await fetchAllLeaderboardFromSupabase(seasonKey)) ?? [];
+    }
+  } else {
+    const all = state.school?.publishedScores ?? [];
+    const forSeason = all.filter((r) => r.seasonKey === seasonKey);
+    const filtered =
+      scope === "kommune"
+        ? forSeason.filter((r) => (myKey ? normalizeKommuneKey(r.kommune) === myKey : false))
+        : forSeason;
+    rows = [...filtered].sort((a, b) => b.points - a.points).slice(0, 50);
+  }
+
+  if (myRankEl) {
+    myRankEl.textContent = "";
+    myRankEl.classList.remove("is-good", "is-warn");
+    if (scope === "kommune" && !userKommune) {
+      myRankEl.textContent = "Lagre kommune i Profil for å se din lokale plass.";
+      myRankEl.classList.add("is-warn");
+    } else if (online && myUid) {
+      const info = await fetchMySupabaseRank(seasonKey, scope, userKommune);
+      if (!info) {
+        // ignore
+      } else if (info.kind === "guest") {
+        myRankEl.textContent = "💡 Logg inn (Profil → voksne) for å se nøyaktig plassering.";
+        myRankEl.classList.add("is-warn");
+      } else if (info.kind === "none") {
+        myRankEl.textContent = "💡 Send inn poeng til topplista for å bli med.";
+        myRankEl.classList.add("is-warn");
+      } else {
+        const where = scope === "kommune" ? userKommune || "kommunen din" : "hele landet";
+        myRankEl.textContent = `📍 Din plass: #${info.rank} i ${where} (${info.points} poeng).`;
+        myRankEl.classList.add("is-good");
+      }
+    } else if (!online) {
+      const nm = String(state.profile?.navn ?? "").trim().toLowerCase();
+      const ep = String(state.profile?.epost ?? "");
+      const alias = ep.includes("@") ? ep.split("@")[0].toLowerCase() : "";
+      const idx = rows.findIndex((r) => {
+        const rn = String(r.name ?? "").toLowerCase();
+        return (nm && rn === nm) || (alias && rn === alias);
+      });
+      if (idx >= 0) {
+        myRankEl.textContent = `📍 Du er nr. ${idx + 1} på lista akkurat nå!`;
+        myRankEl.classList.add("is-good");
+      } else if (rows.length) {
+        myRankEl.textContent =
+          "💡 I demoen: send inn poeng, eller bruk samme navn som i lista for å se din rad uthevet.";
+        myRankEl.classList.add("is-warn");
+      }
+    } else {
+      myRankEl.textContent = "💡 Logg inn for å se din plass på online topplista.";
+      myRankEl.classList.add("is-warn");
+    }
+  }
+
+  if (winnerHeading) {
+    winnerHeading.textContent =
+      scope === "kommune" ? `Leder i ${userKommune || "kommunen din"}` : "Leder på landstoppen";
+  }
+  if (panelTitle) {
+    panelTitle.textContent =
+      scope === "kommune"
+        ? userKommune
+          ? `Rangering — ${userKommune}`
+          : "Rangering (sett kommune i Profil)"
+        : "Rangering — hele landet";
+  }
 
   const winnerBox = $("#winner-box");
   if (winnerBox) {
-    if (!school) winnerBox.textContent = "Registrer skole i Profil først.";
-    else if (rows.length === 0) winnerBox.textContent = "Ingen publiserte poeng ennå. Trykk “Publiser poeng” i denne demoen.";
-    else {
-      winnerBox.textContent = `🏆 ${rows[0].name} leder med ${rows[0].points} poeng.`;
-      if (online) {
-        const w = await fetchSeasonWinnerFromSupabase(seasonKey, school);
-        if (w) {
-          winnerBox.textContent = `🏆 ${w.name} leder med ${w.points} poeng • ${(w.activeMeters / 1000).toFixed(2)} km`;
-        }
-      }
+    if (scope === "kommune" && !userKommune) {
+      setNotice(
+        winnerBox,
+        "Registrer kommune under Profil (eller fullfør registrering) for å se hvem som leder lokalt.",
+        "is-warn",
+      );
+    } else if (rows.length === 0) {
+      setNotice(
+        winnerBox,
+        scope === "kommune"
+          ? "Ingen har publisert poeng i kommunen din ennå. Trykk «Publiser poeng til topplista»."
+          : "Ingen har publisert poeng ennå denne sesongen.",
+        "is-warn",
+      );
+    } else {
+      const w = rows[0];
+      const km = ((w.activeMeters ?? 0) / 1000).toFixed(2);
+      const line =
+        scope === "kommune"
+          ? `🏆 ${w.name} leder med ${w.points} poeng og ${km} km.`
+          : `🏆 ${w.name} leder med ${w.points} poeng • ${km} km • ${w.kommune || "—"}`;
+      setNotice(winnerBox, line, "is-good");
     }
   }
 
   const lb = $("#leaderboard");
   if (lb) {
     lb.innerHTML = "";
-    rows.forEach((r, i) => {
-      const el = document.createElement("div");
-      el.className = "leaderboard__row";
-      el.innerHTML = `
+    if (scope === "kommune" && !userKommune) {
+      const hint = document.createElement("div");
+      hint.className = "muted";
+      hint.style.padding = "8px 0";
+      hint.textContent = "Når du har lagret kommune i profilen, vises lokale spillere her.";
+      lb.appendChild(hint);
+    } else {
+      rows.forEach((r, i) => {
+        const el = document.createElement("div");
+        const nm = String(state.profile?.navn ?? "").trim().toLowerCase();
+        const ep = String(state.profile?.epost ?? "");
+        const alias = ep.includes("@") ? ep.split("@")[0].toLowerCase() : "";
+        const rn = String(r.name ?? "").toLowerCase();
+        const isMe =
+          (myUid && r.userId && r.userId === myUid) || (nm && rn === nm) || (alias && rn === alias);
+        el.className =
+          "leaderboard__row" +
+          (i === 0 ? " leaderboard__row--top" : "") +
+          (isMe ? " leaderboard__row--me" : "");
+        const km = ((r.activeMeters ?? 0) / 1000).toFixed(1);
+        const meta = scope === "all" ? `${escapeHtml(r.kommune || "—")} • ${km} km` : `${km} km sesong`;
+        el.innerHTML = `
         <div class="row" style="gap:10px">
           <div class="leaderboard__pos">${i + 1}</div>
           <div>
             <div class="leaderboard__name">${escapeHtml(r.name)}</div>
-            <div class="leaderboard__meta">${escapeHtml(r.school)} • ${escapeHtml(r.kommune)}</div>
+            <div class="leaderboard__meta">${meta}</div>
           </div>
         </div>
-        <div class="leaderboard__score">${r.points}</div>
+        <div class="leaderboard__score">${r.points} <span class="leaderboard__pts">p</span></div>
       `;
-      lb.appendChild(el);
-    });
+        lb.appendChild(el);
+      });
+    }
   }
-}
-
-async function fetchSchoolLeaderboardFromSupabase(seasonKey, school) {
-  const client = ensureSupabase();
-  if (!client || !school) return null;
-  const { data, error } = await client
-    .from("season_scores")
-    .select("points, active_meters, season_key, skole, kommune, user_id, profiles(display_name)")
-    .eq("season_key", seasonKey)
-    .eq("skole", school)
-    .order("points", { ascending: false })
-    .limit(10);
-  if (error) return null;
-  return (data ?? []).map((r) => ({
-    name: r.profiles?.display_name ?? "spiller",
-    school: r.skole,
-    kommune: r.kommune,
-    seasonKey: r.season_key,
-    points: r.points ?? 0,
-    activeMeters: r.active_meters ?? 0,
-  }));
-}
-
-async function fetchSeasonWinnerFromSupabase(seasonKey, school) {
-  const client = ensureSupabase();
-  if (!client || !school) return null;
-  // Uses the view from README (season_winners). If not created, this will fail silently.
-  const { data, error } = await client
-    .from("season_winners")
-    .select("season_key, skole, kommune, user_id, points, active_meters, profiles(display_name)")
-    .eq("season_key", seasonKey)
-    .eq("skole", school)
-    .limit(1)
-    .maybeSingle();
-  if (error) return null;
-  if (!data) return null;
-  return {
-    name: data.profiles?.display_name ?? "spiller",
-    points: data.points ?? 0,
-    activeMeters: data.active_meters ?? 0,
-    kommune: data.kommune ?? "",
-  };
 }
 
 function escapeHtml(s) {
@@ -1879,14 +3188,15 @@ function boot() {
 
   // Initial route
   if (!state.profile) {
-    setView("onboarding");
-  } else {
-    setView("play");
-    ensureMap();
+    setView("splash");
+    // Show intro only before first registration.
+    // After the animation, go to onboarding form.
     setTimeout(() => {
-      if (mapMode === "3d") map3d && map3d.resize();
-      else map && map.invalidateSize();
-    }, 60);
+      // If user still hasn't registered, show onboarding.
+      if (!state.profile) setView("onboarding");
+    }, 2450);
+  } else {
+    enterPlayView();
   }
 
   updateHeaderSubtitle();
@@ -1915,13 +3225,14 @@ function boot() {
       }
       map3d = null;
       map3dMarker = null;
+      map3dCustomBuildingsAdded = false;
     }
     mapMode = "3d";
     ensureMap3D();
     const ll = session.lastPos?.latlng;
     if (ll) map3dMarker?.setLngLat([ll.lng, ll.lat]);
     setTimeout(() => map3d && map3d.resize(), 80);
-    setNotice($("#motivation"), "3D-kart aktivert (satellitt).", "is-good");
+    setNotice($("#motivation"), "3D-kart aktivert (stilisert vektor).", "is-good");
   });
 
   $("#btn-try-3d")?.addEventListener("click", () => {
@@ -1934,11 +3245,35 @@ function boot() {
       }
       map3d = null;
       map3dMarker = null;
+      map3dCustomBuildingsAdded = false;
       map3dTrailSourceReady = false;
     }
     mapMode = "3d";
     ensureMap3D();
     setTimeout(() => map3d && map3d.resize(), 80);
+  });
+
+  $("#btn-share-trophies")?.addEventListener("click", async () => {
+    try {
+      await shareTrophiesImage();
+    } catch {
+      setNotice($("#share-note"), "Kunne ikke dele akkurat nå.", "is-warn");
+    }
+  });
+
+  const syncLeaderboardTabs = () => {
+    for (const b of document.querySelectorAll("[data-lb-scope]")) {
+      b.classList.toggle("is-active", (b.getAttribute("data-lb-scope") || "") === leaderboardScope);
+    }
+  };
+  syncLeaderboardTabs();
+  document.querySelectorAll("[data-lb-scope]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const next = btn.getAttribute("data-lb-scope") === "all" ? "all" : "kommune";
+      leaderboardScope = next;
+      syncLeaderboardTabs();
+      renderLeaderboard();
+    });
   });
 
   // Motion setup
@@ -1950,7 +3285,19 @@ function boot() {
   startSnapMapTracking();
   updateLocationStatusUi();
 
-  // School actions
+  // Best-effort “keep it similar”: when the app returns from lock/background,
+  // refresh position immediately and continue smoothly.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      refreshLocationAfterResume();
+      if (session.active) void acquireScreenWakeLock();
+    }
+  });
+  window.addEventListener("pageshow", () => {
+    refreshLocationAfterResume();
+  });
+
+  // Leaderboard actions
   $("#btn-publish-score")?.addEventListener("click", async () => {
     if (!state.profile) return;
     const ok = await requestMotionPermissionIfNeeded();
@@ -1958,7 +3305,7 @@ function boot() {
 
     const dateKey = nowIsoDate();
     const seasonKey = seasonKeyFromDate(dateKey);
-    const school = state.profile.skole;
+    const school = state.profile.navn ?? state.profile.lag ?? state.profile.skole ?? "";
     const kommune = state.profile.kommune;
     const points = state.totals.pointsTotal ?? 0;
     const seasonStats = calcSeasonStats(state, seasonKey);
@@ -1985,11 +3332,13 @@ function boot() {
         setNotice($("#winner-box"), `Kunne ikke publisere: ${error.message}`, "is-warn");
         return;
       }
-      setView("school");
-      await renderSchool();
-      setNotice($("#winner-box"), "Publisert til online toppliste!", "is-good");
+      setView("leaderboard");
+      await renderLeaderboard();
     } else {
-      const name = (state.profile.epost || "spiller").split("@")[0] || "spiller";
+      const name =
+        String(state.profile.navn || "").trim() ||
+        (state.profile.epost ? String(state.profile.epost).split("@")[0] : "") ||
+        "spiller";
       const entry = {
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         name,
@@ -2001,16 +3350,15 @@ function boot() {
       };
       state.school.publishedScores = [...(state.school.publishedScores ?? []).filter((r) => r.name !== name), entry];
       saveState(state);
-      setView("school");
-      await renderSchool();
-      setNotice($("#winner-box"), "Publisert! (Demo: lagres bare lokalt)", "is-good");
+      setView("leaderboard");
+      await renderLeaderboard();
     }
   });
 
   $("#btn-tv")?.addEventListener("click", async () => {
     document.body.classList.toggle("is-tv", true);
-    setView("school");
-    renderSchool();
+    setView("leaderboard");
+    renderLeaderboard();
     if (document.documentElement.requestFullscreen) {
       try {
         await document.documentElement.requestFullscreen();
