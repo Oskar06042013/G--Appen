@@ -447,9 +447,21 @@ input:focus{
 /* Reduce visible tile seams / grid lines on some phones */
 .leaflet-tile{
   outline: 1px solid transparent;
+  border: 0.5px solid transparent;
+  box-shadow: 0 0 1px rgba(0,0,0,.01);
+  image-rendering: auto;
+}
+.leaflet-tile-container{
+  transform: translateZ(0);
 }
 .maplibregl-canvas{
   outline: none;
+  transform: translateZ(0.001px);
+  backface-visibility: hidden;
+  image-rendering: auto;
+}
+.maplibregl-canvas-container{
+  background: #070a14;
 }
 
 @media (max-width: 520px){

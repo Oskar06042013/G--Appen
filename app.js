@@ -423,6 +423,8 @@ function ensureMap() {
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     maxZoom: 19,
     detectRetina: true,
+    updateWhenIdle: true,
+    keepBuffer: 6,
     attribution:
       'Tiles &copy; <a href="https://www.esri.com/" target="_blank" rel="noreferrer">Esri</a> • Data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
   }).addTo(map);
@@ -494,25 +496,29 @@ function ensureMap3D() {
 
   map3d.on("load", () => {
     // Reduce visible "tile seams" on mobile for raster layers (satellite imagery).
-    // Works around faint grid lines between tiles.
-    try {
-      const style = map3d.getStyle();
-      for (const layer of style.layers ?? []) {
-        if (layer.type !== "raster") continue;
-        try {
-          map3d.setPaintProperty(layer.id, "raster-fade-duration", 0);
-        } catch {
-          // ignore
+    // Re-run on style changes as well, because some style reloads can reintroduce defaults.
+    const applyRasterSeamFix = () => {
+      try {
+        const style = map3d.getStyle();
+        for (const layer of style.layers ?? []) {
+          if (layer.type !== "raster") continue;
+          try {
+            map3d.setPaintProperty(layer.id, "raster-fade-duration", 0);
+          } catch {
+            // ignore
+          }
+          try {
+            map3d.setPaintProperty(layer.id, "raster-resampling", "nearest");
+          } catch {
+            // ignore
+          }
         }
-        try {
-          map3d.setPaintProperty(layer.id, "raster-resampling", "linear");
-        } catch {
-          // ignore
-        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
+    };
+    applyRasterSeamFix();
+    map3d.on("styledata", applyRasterSeamFix);
 
     // Terrain (3D ground). Works with MapTiler terrain tiles.
     try {
