@@ -1305,28 +1305,46 @@ function initOnboarding() {
   const form = $("#onboarding-form");
   if (!form) return;
 
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    // Show a clear message on mobile if something is missing.
-    if (!form.checkValidity()) {
-      form.reportValidity?.();
-      const note = document.querySelector("#onboarding-note");
+  const runOnboardingComplete = () => {
+    const note = document.querySelector("#onboarding-note");
+    const showNote = (text, variant = "is-warn") => {
       if (note) {
         note.style.display = "block";
-        setNotice(note, "Sjekk at alle felt er fylt ut, og at du har huket av for GPS-samtykke.", "is-warn");
+        setNotice(note, text, variant);
+      }
+    };
+
+    // Eksplisitt sjekk (ikke bare checkValidity): på flere mobiler blokkerer
+    // nettleseren submit uten synlig feilmelding. index.html har novalidate.
+    const kommune = String(form.elements.kommune?.value ?? "").trim();
+    const skole = String(form.elements.skole?.value ?? "").trim();
+    const tlf = String(form.elements.tlf?.value ?? "").trim();
+    const epost = String(form.elements.epost?.value ?? "").trim();
+    const consentEl = document.querySelector("#consent");
+    const consentOk = !!(consentEl && consentEl.checked);
+
+    const missing = [];
+    if (!kommune) missing.push("kommune");
+    if (!skole) missing.push("skole");
+    if (!tlf) missing.push("telefonnummer");
+    if (!epost) missing.push("e-post");
+    if (!consentOk) missing.push("GPS-samtykke (huk av boksen)");
+
+    if (missing.length) {
+      showNote("Fyll ut: " + missing.join(", ") + ".");
+      try {
+        if (!kommune) form.elements.kommune?.focus();
+        else if (!skole) form.elements.skole?.focus();
+        else if (!tlf) form.elements.tlf?.focus();
+        else if (!epost) form.elements.epost?.focus();
+        else if (!consentOk) consentEl?.focus();
+      } catch {
+        // ignore focus errors (iOS)
       }
       return;
     }
-    const fd = new FormData(form);
-    const profile = {
-      kommune: String(fd.get("kommune") || "").trim(),
-      skole: String(fd.get("skole") || "").trim(),
-      tlf: String(fd.get("tlf") || "").trim(),
-      epost: String(fd.get("epost") || "").trim(),
-    };
 
-    if (!profile.kommune || !profile.skole || !profile.tlf || !profile.epost) return;
-
+    const profile = { kommune, skole, tlf, epost };
     state.profile = profile;
     saveState(state);
 
@@ -1334,13 +1352,24 @@ function initOnboarding() {
     updateProfileForm();
     setView("play");
     ensureMap();
-    setTimeout(() => map && map.invalidateSize(), 60);
+    setTimeout(() => {
+      if (mapMode === "3d") map3d && map3d.resize();
+      else map && map.invalidateSize();
+    }, 60);
     updateStatsUi();
     updateSessionUi();
 
     const mot = $("#motivation");
     if (mot) setNotice(mot, "Velkommen! Trykk “Start dagens tur” når du går hjemmefra.", "is-good");
+    if (note) note.style.display = "none";
+  };
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    runOnboardingComplete();
   });
+
+  window.__GA_APP_READY = true;
 }
 
 function initProfile() {
@@ -1767,10 +1796,8 @@ function escapeHtml(s) {
 }
 
 function boot() {
-  // Used by index.html failsafe to avoid blocking submits.
-  window.__GA_APP_READY = true;
-  initNav();
   initOnboarding();
+  initNav();
   initProfile();
   initPlayControls();
 

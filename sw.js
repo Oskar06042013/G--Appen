@@ -1,4 +1,4 @@
-const VERSION = "ga-appen-pwa-v2";
+const VERSION = "ga-appen-pwa-v3";
 
 // Cache only our own assets. (CDN tiles/libs are left to the browser.)
 const CORE_ASSETS = [

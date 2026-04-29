@@ -48,7 +48,7 @@
             Registrer deg med kommune og skole. Data lagres bare lokalt i nettleseren din i denne demoen.
           </p>
 
-          <form id="onboarding-form" class="form">
+          <form id="onboarding-form" class="form" novalidate>
             <div class="grid">
               <label class="field">
                 <span class="field__label">Kommune</span>
@@ -82,7 +82,7 @@
             </label>
 
             <div class="actions">
-              <button class="btn btn--primary" type="submit">Start</button>
+              <button class="btn btn--primary" id="btn-onboarding-start" type="submit">Start</button>
             </div>
             <div class="notice" id="onboarding-note" role="status" aria-live="polite" style="display:none"></div>
           </form>
@@ -407,6 +407,14 @@
         function show(msg) {
           var el = document.getElementById("location-debug");
           if (el) el.textContent = msg;
+          var ob = document.getElementById("view-onboarding");
+          var note = document.getElementById("onboarding-note");
+          if (note && ob && !ob.hidden) {
+            note.style.display = "block";
+            note.textContent = msg;
+            note.classList.remove("is-good");
+            note.classList.add("is-warn");
+          }
         }
         window.addEventListener("error", function (e) {
           show("App-feil: " + (e && e.message ? e.message : "ukjent feil"));
