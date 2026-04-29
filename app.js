@@ -1315,7 +1315,10 @@ function initNav() {
 
 function initOnboarding() {
   const form = $("#onboarding-form");
-  if (!form) return;
+  if (!form) {
+    console.warn("ga-appen: #onboarding-form ikke funnet");
+    return;
+  }
 
   const runOnboardingComplete = () => {
     const note = document.querySelector("#onboarding-note");
@@ -1380,8 +1383,6 @@ function initOnboarding() {
     e.preventDefault();
     runOnboardingComplete();
   });
-
-  window.__GA_APP_READY = true;
 }
 
 function initProfile() {
@@ -1947,6 +1948,8 @@ function boot() {
       timeout: 8_000,
     });
   }
+
+  window.__GA_APP_READY = true;
 }
 
 boot();

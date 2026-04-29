@@ -434,21 +434,25 @@
           var r = e && e.reason ? (e.reason.message || String(e.reason)) : "ukjent";
           show("App-feil: " + r);
         });
-        window.addEventListener("load", function () {
-          var form = document.getElementById("onboarding-form");
-          if (!form) return;
-          form.addEventListener("submit", function (evt) {
-            // Only stop a hard reload if app.js did NOT boot.
-            // If app is ready, let app.js handle the form submit.
-            if (!window.__GA_APP_READY) {
-              evt.preventDefault();
-              show("Appen er ikke ferdig lastet. Prøv å refresh, eller se feilmelding over.");
-            }
-          });
-        });
       })();
     </script>
     <script src="./app.js"></script>
+    <script>
+      // Etter app.js: ikke blokker Start med ekstra submit-lytter (gav falsk «ikke ferdig lastet» på iOS/PWA).
+      window.addEventListener("load", function () {
+        if (!window.__GA_APP_READY) {
+          var note = document.getElementById("onboarding-note");
+          var ob = document.getElementById("view-onboarding");
+          if (note && ob && !ob.hidden) {
+            note.style.display = "block";
+            note.textContent =
+              "Appen startet ikke helt (nettverk eller gammel cache). Prøv å dra ned for å oppdatere siden, eller tøm Safari-data for dette nettstedet.";
+            note.classList.remove("is-good");
+            note.classList.add("is-warn");
+          }
+        }
+      });
+    </script>
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
