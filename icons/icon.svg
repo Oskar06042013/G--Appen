@@ -1,83 +1,41 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#7c5cff" />
-      <stop offset="1" stop-color="#2ee59d" />
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6b63ff" />
+      <stop offset="1" stop-color="#29d8a1" />
     </linearGradient>
-    <linearGradient id="shine" x1="0" x2="0" y1="0" y2="1">
-      <stop offset="0" stop-color="rgba(255,255,255,0.28)" />
-      <stop offset="1" stop-color="rgba(255,255,255,0.00)" />
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".24" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
     </linearGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#000" flood-opacity=".38" />
-    </filter>
-    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity=".22" />
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#000000" flood-opacity=".28" />
     </filter>
   </defs>
 
-  <!-- Bold badge background -->
-  <rect x="56" y="56" width="400" height="400" rx="140" fill="url(#bg)" filter="url(#shadow)" />
-  <path d="M82 120 C 210 40, 302 52, 430 140" fill="none" stroke="url(#shine)" stroke-width="36" opacity="0.95" />
+  <rect x="44" y="44" width="424" height="424" rx="132" fill="url(#bg)" filter="url(#shadow)" />
+  <path d="M88 128 C 190 66, 328 64, 426 142" fill="none" stroke="url(#shine)" stroke-width="34" />
 
-  <!-- Inner shield -->
-  <path
-    d="M256 116
-       C 332 116, 388 152, 402 220
-       C 420 306, 356 382, 256 410
-       C 156 382, 92 306, 110 220
-       C 124 152, 180 116, 256 116 Z"
-    fill="rgba(11,16,32,0.30)"
-    stroke="rgba(255,255,255,0.18)"
-    stroke-width="2"
-  />
+  <circle cx="256" cy="264" r="132" fill="#0f1d3a" fill-opacity=".24" />
 
-  <!-- Route line -->
   <path
-    d="M148 332 C 196 308, 228 286, 256 252 C 292 210, 330 198, 372 180"
+    d="M126 348 C 176 318, 214 286, 254 240 C 286 204, 328 176, 386 158"
     fill="none"
-    stroke="rgba(255,255,255,0.72)"
-    stroke-width="16"
+    stroke="#ffffff"
+    stroke-opacity=".9"
+    stroke-width="18"
     stroke-linecap="round"
-    stroke-dasharray="2 26"
-    opacity="0.95"
+    stroke-dasharray="4 24"
   />
 
-  <!-- Power footprint (more aggressive) -->
-  <g filter="url(#soft)" fill="rgba(255,255,255,0.92)">
-    <path
-      d="M188 320
-         C 176 304, 182 282, 200 272
-         C 220 260, 244 270, 254 292
-         C 264 314, 256 336, 234 344
-         C 212 352, 198 340, 188 320 Z"
-      opacity="0.95"
-    />
-    <circle cx="206" cy="258" r="6" />
-    <circle cx="222" cy="254" r="5.6" />
-    <circle cx="238" cy="258" r="5.2" />
-    <circle cx="250" cy="270" r="5.0" />
-  </g>
-
-  <!-- Minimal school + flag -->
-  <g transform="translate(292 150)" filter="url(#soft)">
-    <path d="M0 80 L70 40 L140 80 L140 154 L0 154 Z" fill="rgba(255,255,255,0.90)" />
-    <rect x="54" y="104" width="32" height="50" rx="10" fill="rgba(11,16,32,0.30)" />
-    <path d="M70 14 L70 58" stroke="rgba(255,255,255,0.95)" stroke-width="8" stroke-linecap="round" />
-    <path d="M70 14 L96 26" stroke="rgba(255,77,109,0.98)" stroke-width="8" stroke-linecap="round" />
-  </g>
-
-  <!-- Monogram (fix encoding by using path-like letters: GA) -->
-  <text
-    x="172"
-    y="206"
-    text-anchor="middle"
-    font-family="system-ui, Segoe UI, Roboto, Arial"
-    font-size="64"
-    font-weight="900"
-    fill="rgba(6,16,35,0.78)"
-  >
-    GA
-  </text>
+  <path
+    d="M256 148
+       C 208 148, 170 186, 170 234
+       C 170 286, 214 338, 256 386
+       C 298 338, 342 286, 342 234
+       C 342 186, 304 148, 256 148 Z"
+    fill="#ffffff"
+  />
+  <circle cx="256" cy="232" r="38" fill="#5875ff" />
 </svg>
 

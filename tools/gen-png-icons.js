@@ -60,11 +60,10 @@ function minDistToQBezier(px, py, p0, p1, p2, samples = 48) {
   return Math.sqrt(m);
 }
 
-function insideShield(px, py, w, h) {
-  const nx = (px - w * 0.5) / (w * 0.34);
-  const ny = (py - h * 0.52) / (h * 0.38);
-  const d = nx * nx + ny * ny * 0.92;
-  return d < 1;
+function insideCircle(px, py, cx, cy, r) {
+  const dx = px - cx;
+  const dy = py - cy;
+  return dx * dx + dy * dy <= r * r;
 }
 
 function pixelColor(x, y, size) {
@@ -84,18 +83,18 @@ function pixelColor(x, y, size) {
   const t = (lx / Math.max(1, iw - 1) + ly / Math.max(1, ih - 1)) / 2;
   let [r, g, b] = lerpRgb(PURPLE, MINT, Math.max(0, Math.min(1, t)));
 
-  if (insideShield(x, y, w, h)) {
-    const a = 0.32;
+  if (insideCircle(x, y, w * 0.5, h * 0.52, size * 0.26)) {
+    const a = 0.28;
     r = Math.round(r * (1 - a) + SHIELD[0] * a);
     g = Math.round(g * (1 - a) + SHIELD[1] * a);
     b = Math.round(b * (1 - a) + SHIELD[2] * a);
   }
 
-  const p0 = [margin + iw * 0.12, margin + ih * 0.72];
-  const p1 = [margin + iw * 0.48, margin + ih * 0.38];
-  const p2 = [margin + iw * 0.88, margin + ih * 0.18];
-  const d = minDistToQBezier(x, y, p0, p1, p2, size > 256 ? 80 : 48);
-  const halfW = Math.max(4.5, size * 0.032);
+  const p0 = [margin + iw * 0.15, margin + ih * 0.72];
+  const p1 = [margin + iw * 0.50, margin + ih * 0.45];
+  const p2 = [margin + iw * 0.86, margin + ih * 0.27];
+  const d = minDistToQBezier(x, y, p0, p1, p2, size > 256 ? 92 : 56);
+  const halfW = Math.max(4, size * 0.028);
   const tLine = Math.max(0, Math.min(1, 1 - (d - (halfW - 2)) / 4));
   const smooth = tLine * tLine * (3 - 2 * tLine);
   if (smooth > 0.01) {
@@ -104,6 +103,29 @@ function pixelColor(x, y, size) {
     r = Math.round(r * (1 - alpha) + br * alpha);
     g = Math.round(g * (1 - alpha) + br * alpha);
     b = Math.round(b * (1 - alpha) + br * alpha);
+  }
+
+  // White map pin (circle + tail)
+  const pcx = w * 0.5;
+  const pcy = h * 0.44;
+  const pr = size * 0.16;
+  const top = insideCircle(x, y, pcx, pcy, pr);
+  const tailTop = pcy + pr * 0.15;
+  const tailBottom = pcy + pr * 2.2;
+  const tailT = (y - tailTop) / Math.max(1, tailBottom - tailTop);
+  const tailHalf = Math.max(0, (1 - tailT) * pr * 0.52);
+  const inTail = y >= tailTop && y <= tailBottom && Math.abs(x - pcx) <= tailHalf;
+  if (top || inTail) {
+    r = 255;
+    g = 255;
+    b = 255;
+  }
+
+  // Pin center hole
+  if (insideCircle(x, y, pcx, pcy, pr * 0.42)) {
+    r = 88;
+    g = 117;
+    b = 255;
   }
 
   return [r, g, b, 255];
