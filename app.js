@@ -1046,6 +1046,39 @@ function $(sel) {
   return document.querySelector(sel);
 }
 
+/** After map container gets a real size in the layout, fix grey gaps / mis-sized tiles. */
+function scheduleMapLayoutFix() {
+  const run = () => {
+    try {
+      if (mapMode === "3d" && map3d) map3d.resize();
+      else if (map && mapMode === "2d") map.invalidateSize({ animate: false });
+    } catch {
+      // ignore
+    }
+  };
+  requestAnimationFrame(() => {
+    run();
+    requestAnimationFrame(run);
+    setTimeout(run, 100);
+    setTimeout(run, 320);
+  });
+}
+
+/** Keep pinch/drag on the map from scrolling the rest of the app. */
+function bindMapGestureContainment(el) {
+  if (!el || el.dataset.gaMapTouch === "1") return;
+  el.dataset.gaMapTouch = "1";
+  const onTouchMove = (e) => {
+    e.stopPropagation();
+    try {
+      e.preventDefault();
+    } catch {
+      // ignore
+    }
+  };
+  el.addEventListener("touchmove", onTouchMove, { passive: false });
+}
+
 function setView(view) {
   const views = ["splash", "loading", "onboarding", "play", "tasks", "leaderboard", "profile", "about"];
   for (const v of views) {
@@ -1056,8 +1089,14 @@ function setView(view) {
   for (const btn of document.querySelectorAll(".nav__btn")) {
     btn.classList.toggle("is-active", btn.dataset.view === view);
   }
-  // Prevent the page from scrolling while using the map.
-  document.body.classList.toggle("is-play-view", view === "play");
+  const enteringPlay = view === "play" && !document.body.classList.contains("is-play-view");
+  const leavingPlay = view !== "play" && document.body.classList.contains("is-play-view");
+  if (enteringPlay) {
+    document.body.classList.add("is-play-view");
+    scheduleMapLayoutFix();
+  } else if (leavingPlay) {
+    document.body.classList.remove("is-play-view");
+  }
 }
 
 function formatKm(m) {
@@ -1159,10 +1198,7 @@ async function enterPlayView() {
   } catch {
     // ignore
   }
-  setTimeout(() => {
-    if (mapMode === "3d") map3d && map3d.resize();
-    else map && map.invalidateSize();
-  }, 60);
+  scheduleMapLayoutFix();
 
   updateStatsUi();
   updateSessionUi();
@@ -1347,14 +1383,7 @@ function ensureMap() {
     if (c && L?.DomEvent) {
       L.DomEvent.disableClickPropagation(c);
       L.DomEvent.disableScrollPropagation(c);
-      // iOS Safari: prevent the page from moving while pinching/dragging inside the map.
-      c.addEventListener(
-        "touchmove",
-        (e) => {
-          e.preventDefault();
-        },
-        { passive: false },
-      );
+      bindMapGestureContainment(c);
     }
   } catch {
     // ignore
@@ -1416,6 +1445,8 @@ function ensureMap() {
     if (b) b.textContent = "Følg: Av";
     setNotice($("#motivation"), "Følg er av (du drar kartet). Trykk «Følg: På» for å følge deg igjen.", null);
   });
+
+  scheduleMapLayoutFix();
 }
 
 function ensureMap3D() {
@@ -1449,8 +1480,9 @@ function ensureMap3D() {
     map3dTrailSourceReady = false;
     mapMode = "2d";
     $("#map")?.classList.remove("is-3d");
+    $("#map")?.removeAttribute("data-ga-map-touch");
     ensureMap();
-    setTimeout(() => map && map.invalidateSize(), 60);
+    scheduleMapLayoutFix();
     if (mot) {
       setNotice(
         mot,
@@ -1477,6 +1509,11 @@ function ensureMap3D() {
     fadeDuration: 360,
   });
   lastBearing = -18;
+  try {
+    bindMapGestureContainment(map3d.getContainer());
+  } catch {
+    // ignore
+  }
 
   // If MapTiler (or network) rate-limits, don't brick the app.
   // MapLibre emits 'error' events for tile/style/source failures.
@@ -1729,6 +1766,8 @@ function ensureMap3D() {
     } catch {
       map3dTrailSourceReady = false;
     }
+
+    scheduleMapLayoutFix();
   });
 
   // UX: user gesture disables follow (so the camera doesn't fight the finger).
@@ -2528,14 +2567,6 @@ function initNav() {
         return;
       }
       setView(view);
-      if (view === "play") {
-        ensureMap();
-        // Leaflet needs an invalidate when container becomes visible
-        setTimeout(() => {
-          if (mapMode === "3d") map3d && map3d.resize();
-          else map && map.invalidateSize();
-        }, 50);
-      }
       if (view === "tasks") {
         renderTasks();
       }
@@ -2785,11 +2816,7 @@ function initPlayControls() {
       btn.textContent = collapsed ? "Vis" : "Skjul";
       btn.setAttribute("aria-expanded", String(!collapsed));
     }
-    // Ensure map gets a resize after layout change
-    setTimeout(() => {
-      if (mapMode === "3d") map3d && map3d.resize();
-      else map && map.invalidateSize();
-    }, 80);
+    scheduleMapLayoutFix();
   });
   $("#btn-refresh-location")?.addEventListener("click", () => {
     if (!navigator.geolocation) return;
@@ -3214,6 +3241,17 @@ function boot() {
   initProfile();
   initPlayControls();
 
+  const playMapWrap = document.querySelector(".play__map-wrap");
+  if (playMapWrap) {
+    bindMapGestureContainment(playMapWrap);
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => {
+        if (document.body.classList.contains("is-play-view")) scheduleMapLayoutFix();
+      });
+      ro.observe(playMapWrap);
+    }
+  }
+
   // Initial route
   if (!state.profile) {
     setView("splash");
@@ -3255,11 +3293,12 @@ function boot() {
       map3dMarker = null;
       map3dCustomBuildingsAdded = false;
     }
+    $("#map")?.removeAttribute("data-ga-map-touch");
     mapMode = "3d";
     ensureMap3D();
     const ll = session.lastPos?.latlng;
     if (ll) map3dMarker?.setLngLat([ll.lng, ll.lat]);
-    setTimeout(() => map3d && map3d.resize(), 80);
+    scheduleMapLayoutFix();
     setNotice($("#motivation"), "3D-kart aktivert (stilisert vektor).", "is-good");
   });
 
@@ -3276,9 +3315,10 @@ function boot() {
       map3dCustomBuildingsAdded = false;
       map3dTrailSourceReady = false;
     }
+    $("#map")?.removeAttribute("data-ga-map-touch");
     mapMode = "3d";
     ensureMap3D();
-    setTimeout(() => map3d && map3d.resize(), 80);
+    scheduleMapLayoutFix();
   });
 
   $("#btn-share-trophies")?.addEventListener("click", async () => {
@@ -3319,10 +3359,12 @@ function boot() {
     if (document.visibilityState === "visible") {
       refreshLocationAfterResume();
       if (session.active) void acquireScreenWakeLock();
+      if (document.body.classList.contains("is-play-view")) scheduleMapLayoutFix();
     }
   });
   window.addEventListener("pageshow", () => {
     refreshLocationAfterResume();
+    if (document.body.classList.contains("is-play-view")) scheduleMapLayoutFix();
   });
 
   // Leaderboard actions
