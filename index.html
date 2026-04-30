@@ -146,12 +146,15 @@
 
       <section id="view-play" class="view" hidden>
         <div class="play">
-          <div class="play__map">
-            <div id="map" class="map" aria-label="Kart"></div>
-            <canvas id="weather-fx" class="weather-fx" aria-hidden="true"></canvas>
-            <div id="trophy-toast" class="toast" aria-live="polite" aria-atomic="true" hidden></div>
+          <div class="play__map-wrap">
+            <div class="play__map">
+              <div id="map" class="map" aria-label="Kart"></div>
+              <canvas id="weather-fx" class="weather-fx" aria-hidden="true"></canvas>
+              <div id="trophy-toast" class="toast" aria-live="polite" aria-atomic="true" hidden></div>
+            </div>
           </div>
 
+          <div class="play__scroll">
           <aside class="play__panel" aria-label="Poeng og kontrollpanel">
             <div class="card play__card">
               <div class="sheet-handle" aria-hidden="true"></div>
@@ -302,6 +305,7 @@
               </div>
             </div>
           </aside>
+          </div>
         </div>
       </section>
 
