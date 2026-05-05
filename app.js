@@ -1359,6 +1359,7 @@ function ensureMap() {
   if (map) return;
   // Disable zoom/fade animations to avoid visible “tile grid” seams on iOS while pinching.
   map = L.map("map", {
+    attributionControl: false,
     zoomControl: true,
     zoomAnimation: false,
     fadeAnimation: false,
@@ -1498,6 +1499,7 @@ function ensureMap3D() {
   map3dCustomBuildingsAdded = false;
   map3d = new maplibregl.Map({
     container: "map",
+    attributionControl: false,
     // Vector + 3D buildings + terrain: continuous look when zooming (no satellite photo tiles).
     style: `https://api.maptiler.com/maps/${MAPTILER_3D_STYLE_ID}/style.json?key=${key}`,
     center: [10.7522, 59.9139],

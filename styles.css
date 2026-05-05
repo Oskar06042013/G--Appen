@@ -29,28 +29,12 @@ body{
   overscroll-behavior: none;
 }
 
-/* In Play view: column layout so only the panel scrolls; map stays fixed height. */
+/* In Play view we lock page scroll so map gestures don't scroll the app. */
 body.is-play-view{
   overflow: hidden;
   height: 100dvh;
-  max-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-}
-body.is-play-view .main{
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  padding: 10px 0 14px;
-}
-#view-play.view:not([hidden]){
-  display: flex !important;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  touch-action: none;
+  -webkit-overflow-scrolling: auto;
 }
 
 .container{
@@ -396,15 +380,13 @@ input:focus{
   font-size: 12px;
 }
 
-/* Play: fixed-height map strip + scrollable panel (header stays put). */
+/* Fullscreen play layout: map + side panel overlay */
 .play{
   position: relative;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  height: calc(100dvh - 64px);
+  min-height: 620px;
   border-radius: var(--radius);
+  overflow: hidden;
   border: 1px solid rgba(255,255,255,.10);
   box-shadow: var(--shadow);
   background: rgba(0,0,0,.18);
@@ -414,24 +396,13 @@ input:focus{
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 3;
+  z-index: 6;
   background:
     radial-gradient(900px 460px at 80% 20%, rgba(124,92,255,.10), transparent 55%),
     radial-gradient(900px 520px at 10% 120%, rgba(46,229,157,.10), transparent 60%),
     linear-gradient(180deg, rgba(0,0,0,.12), rgba(0,0,0,.00) 30%, rgba(0,0,0,.14));
   mix-blend-mode: screen;
   opacity: .75;
-}
-.play__map-wrap{
-  position: relative;
-  flex: 0 0 auto;
-  height: 40vh;
-  min-height: 280px;
-  max-height: min(420px, 48vh);
-  overflow: hidden;
-  touch-action: none;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  z-index: 1;
 }
 .play__map{
   position: absolute;
@@ -440,19 +411,6 @@ input:focus{
 .play .map{
   height: 100%;
   width: 100%;
-  min-height: 0;
-}
-.play__scroll{
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
-  border-radius: 0 0 var(--radius) var(--radius);
-  position: relative;
-  z-index: 2;
-  background: linear-gradient(180deg, rgba(7,10,20,.55), rgba(7,10,20,.35));
 }
 .weather-fx{
   position: absolute;
@@ -513,11 +471,11 @@ input:focus{
   100%{ opacity: 0; transform: translateY(-8px) scale(.99); filter: blur(1.5px); }
 }
 .play__panel{
-  position: relative;
-  width: 100%;
-  max-width: none;
-  z-index: 4;
-  padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: min(420px, calc(100% - 28px));
+  z-index: 8;
 }
 .play__card{
   backdrop-filter: blur(16px);
@@ -646,10 +604,6 @@ input:focus{
 }
 
 @media (max-width: 720px){
-  .play__map-wrap{
-    min-height: 260px;
-    height: 38vh;
-  }
   .play__card{
     padding: 14px;
     border-radius: var(--radius-lg);
@@ -660,9 +614,10 @@ input:focus{
   }
 }
 
-/* Collapsible panel */
+/* Collapsible panel: keep map draggable */
 .play.is-panel-collapsed .play__panel{
-  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  max-height: none;
+  overflow: visible;
 }
 .play.is-panel-collapsed .play__card{
   padding: 12px 14px;
@@ -732,7 +687,20 @@ input:focus{
   }
 
   .play__panel{
-    border-radius: 0;
+    left: 14px;
+    right: 14px;
+    top: auto;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    max-height: 56vh; /* leave visible map area to drag */
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+  }
+
+  .play__card{
+    max-height: 56vh;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   /* Make primary actions feel like native controls */
@@ -873,6 +841,8 @@ input:focus{
   border-radius: 10px !important;
   padding: 4px 8px !important;
 }
+.leaflet-control-attribution{ display: none !important; }
+.maplibregl-ctrl-attrib{ display: none !important; }
 .leaflet-bar a{
   background: rgba(0,0,0,.40) !important;
   color: rgba(255,255,255,.85) !important;

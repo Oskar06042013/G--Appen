@@ -146,15 +146,11 @@
 
       <section id="view-play" class="view" hidden>
         <div class="play">
-          <div class="play__map-wrap">
-            <div class="play__map">
-              <div id="map" class="map" aria-label="Kart"></div>
-              <canvas id="weather-fx" class="weather-fx" aria-hidden="true"></canvas>
-              <div id="trophy-toast" class="toast" aria-live="polite" aria-atomic="true" hidden></div>
-            </div>
+          <div class="play__map">
+            <div id="map" class="map" aria-label="Kart"></div>
+            <canvas id="weather-fx" class="weather-fx" aria-hidden="true"></canvas>
+            <div id="trophy-toast" class="toast" aria-live="polite" aria-atomic="true" hidden></div>
           </div>
-
-          <div class="play__scroll">
           <aside class="play__panel" aria-label="Poeng og kontrollpanel">
             <div class="card play__card">
               <div class="sheet-handle" aria-hidden="true"></div>
@@ -305,7 +301,6 @@
               </div>
             </div>
           </aside>
-          </div>
         </div>
       </section>
 
@@ -530,6 +525,18 @@
               <li>Offisiell personvernerklæring for skole/kommune</li>
               <li>Enkle premier som er avtalt lokalt</li>
             </ul>
+          </div>
+
+          <div class="card card--soft" style="margin-top:14px">
+            <h3>Kartkilder</h3>
+            <ul class="muted">
+              <li>3D-kart: MapTiler (vektor/terreng/bygg) via MapLibre</li>
+              <li>2D-kart (uten nøkkel): Esri World Imagery</li>
+              <li>Referansedata: OpenStreetMap-bidragsytere</li>
+            </ul>
+            <div class="muted" style="font-size:12px; margin-top:8px">
+              Kartkilder vises her for å holde kartet helt rent i Spill-visningen.
+            </div>
           </div>
         </div>
       </section>
